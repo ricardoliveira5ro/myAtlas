@@ -93,7 +93,7 @@ The Next.js server can render public `/@<handle>` profile pages for search engin
 These are recommended defaults for the implementation handoff; version pins should be refreshed when coding begins:
 
 - **Backend:** OpenJDK 25 LTS distribution (recommended: Eclipse Temurin), Spring Boot 4.1.x, Maven Wrapper, Spring Security, Spring Data JPA, and Flyway. Pin the latest supported patch versions when implementation begins; do not depend on an Oracle JDK download/license for the free build environment.
-- **Web frontend:** Next.js 16 App Router, React, TypeScript, Node.js 24 LTS, and `pnpm`. Render public handle pages on the server for indexability; render the interactive map in a client component. Use Tailwind CSS with accessible, project-owned design tokens and components.
+- **Web frontend:** Next.js 16 App Router, React, TypeScript, Node.js 24 LTS, and `npm` with workspaces. Render public handle pages on the server for indexability; render the interactive map in a client component. Use Tailwind CSS with accessible, project-owned design tokens and components.
 - **Database:** PostgreSQL 18.x with the latest stable PostGIS release compatible with that PostgreSQL major version. Run it self-managed on the free OCI compute host unless an OCI managed option is verified as Always Free.
 - **API contract:** REST over HTTPS using JSON, documented with OpenAPI 3.1. Use RFC 9457 Problem Details for API errors.
 - **Map renderer:** MapLibre GL JS.
@@ -599,7 +599,7 @@ my-atlas/
 
 ### 16.1 Local development and CI
 
-Required local tools: Git, Java 25 JDK, Maven Wrapper, Node.js 24 LTS, `pnpm`, and Docker with Compose. The repository must pin Java and Node versions in toolchain files and use Maven Wrapper so contributors do not need a globally installed Maven version.
+Required local tools: Git, Java 25 JDK, Maven Wrapper, Node.js 24 LTS, `npm`, and Docker with Compose. The repository must pin Java and Node versions in toolchain files and use Maven Wrapper so contributors do not need a globally installed Maven version.
 
 Recommended root developer commands (implement as `Makefile` targets or equivalent scripts):
 

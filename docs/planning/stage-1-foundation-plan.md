@@ -1,8 +1,8 @@
 # Stage 1 — Build a reproducible project foundation (detailed plan)
 
 **Status:** Ready for implementation
-**Source:** [`ROADMAP.md`](../../ROADMAP.md) §6 (Stage 1) and [`TECHNICAL_DESIGN.md`](../../TECHNICAL_DESIGN.md)
-**Product concept:** [`IDEA.md`](../../IDEA.md)
+**Source:** [`ROADMAP.md`](../ROADMAP.md) §6 (Stage 1) and [`TECHNICAL_DESIGN.md`](../TECHNICAL_DESIGN.md)
+**Product concept:** [`IDEA.md`](../IDEA.md)
 **Scope note:** This plan intentionally does not predict dates. Work advances when each task's acceptance check passes.
 
 ---
@@ -21,7 +21,7 @@ This plan is written for a single developer (or a coding agent) to execute task 
 | --- | --- | --- |
 | Service scope | Walking skeleton: all four Spring services (account, atlas, media, social) plus the web shell, each runnable with its own database identity, role, and Flyway baseline. | Satisfies the exit check that each service owns its database and migration history, and de-risks the deployment model early. |
 | Version control / CI | GitHub repository with GitHub Actions. | Free, ARM64 `buildx` support, OIDC available for later OCI auth. |
-| Local tooling | Makefile targets, Mailpit mail catcher, Testcontainers + PostGIS for integration tests, pnpm workspaces, versions pinned via `.tool-versions` and `.nvmrc`. | Matches design §16.1 (Makefile targets) and keeps the toolchain reproducible. |
+| Local tooling | Makefile targets, Mailpit mail catcher, Testcontainers + PostGIS for integration tests, npm workspaces, versions pinned via `.tool-versions` and `.nvmrc`. | Matches design §16.1 (Makefile targets) and keeps the toolchain reproducible. |
 | API contract | Code-first with `springdoc-openapi`; the generated OpenAPI 3.1 document is committed per service; TypeScript types are generated for the web with `openapi-typescript`. | One source of truth (Java code); no hand-maintained duplicate request types in TypeScript (design §9.1). |
 | Database schema | Minimal per-service baseline migration proving the mechanism; business tables from design §8 land in Stage 3. | Avoids premature schema and rework. |
 | CI / infra reach | Full design coverage: format, lint, tests, contract validation, dependency scan, ARM64 image builds; plus a Terraform skeleton that validates but provisions nothing. | Proves the deployment artifact shape before Stage 2. |
@@ -69,16 +69,16 @@ Each task lists a **Deliverable** and an **Acceptance** check. Do not mark a tas
 
 - **M0.1 — Initialize version control.**
   - Deliverable: `git init` with branch `main`; initial commit containing the current documents; `.gitignore` covering Java (`target/`), Node (`node_modules/`, `.next/`), env files (`*.env`, `.env`), IDE files, OS files.
-  - Decision: keep `IDEA.md`, `ROADMAP.md`, and `TECHNICAL_DESIGN.md` at the repository root so their existing relative cross-links stay valid. Create `docs/` for ADRs, engineering notes, and planning. Reconcile design §16's `docs/TECHNICAL_DESIGN.md` reference later if desired (do not move now to avoid link churn).
+  - Decision: `IDEA.md`, `ROADMAP.md`, and `TECHNICAL_DESIGN.md` live under `docs/` (as `docs/IDEA.md`, `docs/ROADMAP.md`, `docs/TECHNICAL_DESIGN.md`). Their cross-links stay valid because the three documents are co-located. `docs/` also holds ADRs, engineering notes, and this planning directory. The repository root keeps only tooling and the entry `README`.
   - Acceptance: `git log` shows the initial commit; `git status` clean.
 - **M0.2 — Create the monorepo skeleton.**
   - Deliverable: directory layout from design §16:
     ```text
     apps/web/
-    services/account-service/
-    services/atlas-service/
-    services/media-service/
-    services/social-service/
+    services/account/
+    services/atlas/
+    services/media/
+    services/social/
     contracts/openapi/
     data/natural-earth/
     data/place-import/
@@ -89,11 +89,11 @@ Each task lists a **Deliverable** and an **Acceptance** check. Do not mark a tas
     docs/planning/
     docker-compose.yml
     ```
-    Add `.gitkeep` files so empty directories are tracked.
+    Add `.gitkeep` files so empty directories are tracked. Service directories are named without a `-service` suffix (`account`, `atlas`, `media`, `social`) by owner choice, deviating from design §16's `*-service/` spelling; API route prefixes remain `identity/atlas/media/social` (design §9.1).
   - Acceptance: tree matches the layout; committed.
 - **M0.3 — Pin the toolchain.**
-  - Deliverable: `.tool-versions` (Java 25 Temurin, Node 24 LTS), `.nvmrc` (`24`), root `package.json` with `packageManager` pinned to a pnpm version and `engines`, `.editorconfig`.
-  - Acceptance: a fresh checkout resolves the pinned versions with the documented manager (mise/asdf for Java, corepack for pnpm).
+  - Deliverable: `.tool-versions` (Java 25 Temurin, Node 24 LTS), `.nvmrc` (`24`), root `package.json` declaring npm workspaces (`apps/*`) and `engines`, `.editorconfig`.
+  - Acceptance: a fresh checkout resolves the pinned versions with the documented manager (mise/asdf for Java); `npm` is the standard package manager.
 - **M0.4 — Root command surface.**
   - Deliverable: root `Makefile` with targets `dev-infra`, `dev-infra-down`, `dev`, `format`, `lint`, `test`, `build`, `contracts`, `infra-validate`, and `help`. Targets may be stubs until their milestone wires them.
   - Acceptance: `make help` lists every target; `make` with no target prints help.
@@ -145,8 +145,8 @@ Each task lists a **Deliverable** and an **Acceptance** check. Do not mark a tas
 ### M4 — Web application shell
 
 - **M4.1 — Next.js shell.**
-  - Deliverable: Next.js 16 App Router project in `apps/web` using TypeScript and Tailwind, registered as a pnpm workspace; env-driven configuration; a minimal application shell.
-  - Acceptance: `pnpm install && pnpm build` succeeds in a fresh checkout.
+  - Deliverable: Next.js 16 App Router project in `apps/web` using TypeScript and Tailwind, registered as an npm workspace; env-driven configuration; a minimal application shell.
+  - Acceptance: `npm install && npm run build` succeeds in a fresh checkout.
 - **M4.2 — Public handle route.**
   - Deliverable: page at `/profile/[handle]` and an explicit rewrite from `/@:handle` to it (design §15.2, note the App Router `@` parallel-route caveat). A placeholder renders a handle.
   - Acceptance: requesting `/@somehandle` renders the profile route; no route folder named `@...` exists.
@@ -175,7 +175,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Do not mark a tas
   - Deliverable: ARM64 multi-platform `buildx` builds for the four services and the web app, with pinned base image tags (no `latest` in deployment definitions).
   - Acceptance: images build for `linux/arm64` in CI.
 - **M6.4 — Dependency updates.**
-  - Deliverable: Dependabot (or Renovate) configuration for Maven, npm/pnpm, GitHub Actions, and Docker.
+  - Deliverable: Dependabot (or Renovate) configuration for Maven, npm, GitHub Actions, and Docker.
   - Acceptance: the bot opens a test update PR.
 
 ### M7 — Root commands, contributor/agent guide, observability baseline
@@ -235,7 +235,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Do not mark a tas
 
 - **Version pins are provisional.** Spring Boot 4.1.x, Java 25, Next.js 16, PostgreSQL 18, and PostGIS must be re-verified for the latest supported patch/minor at execution time (design §3). Re-check before committing M0.3/M3.2.
 - **Spring Boot 4.1.x / Java 25 toolchain maturity.** If a dependency lacks a compatible release, prefer the newest supported combination rather than pinning an unverifiable version; record the change in ADR-0002.
-- **Doc location.** This plan keeps the three root documents at the repository root (see M0.1). If design §16's `docs/TECHNICAL_DESIGN.md` layout is preferred, perform the move once and update all relative links.
+- **Doc location.** The three product/design documents live under `docs/` (see M0.1). Keep future documentation in `docs/` and the repository root free of prose documents.
 - **CI cost/time.** ARM64 image builds and Testcontainers make CI heavier; keep the backend matrix and image builds as separate jobs so failures are attributable.
 
 ### Carried from Stage 0 (not blocking Stage 1)
