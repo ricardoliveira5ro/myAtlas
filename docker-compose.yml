@@ -1,0 +1,46 @@
+services:
+  postgres:
+    # PostgreSQL 18 with PostGIS 3.6 added.
+    # PostGIS provides spatial and geographic database features
+    image: postgis/postgis:18-3.6
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-local_admin_password}
+      ACCOUNT_DB_PASSWORD: ${ACCOUNT_DB_PASSWORD:-account_local_password}
+      ATLAS_DB_PASSWORD: ${ATLAS_DB_PASSWORD:-atlas_local_password}
+      MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:-media_local_password}
+      SOCIAL_DB_PASSWORD: ${SOCIAL_DB_PASSWORD:-social_local_password}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      # Keep PostgreSQL data in a Docker-managed volume so it survives container recreation.
+      - postgres-data:/var/lib/postgresql
+      # Give PostgreSQL the local database and role setup script; :ro means read-only.
+      # Local path 'infra/compose/postgres-init' | Path inside the container 'docker-entrypoint-initdb.d'
+      - ./infra/compose/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.27.8
+    ports:
+      # App sends local email using SMTP
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+      # Web page to view the captured messages
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

@@ -11,10 +11,10 @@ help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 dev-infra: ## Start local infrastructure (Postgres/PostGIS + Mailpit)
-	@printf 'dev-infra: not wired yet (see M1.1)\n'
+	docker compose up -d --wait
 
 dev-infra-down: ## Stop and remove local infrastructure
-	@printf 'dev-infra-down: not wired yet (see M1.1)\n'
+	docker compose down
 
 dev: ## Run the application locally (services + web shell)
 	@printf 'dev: not wired yet (see M3.2 and M4)\n'
