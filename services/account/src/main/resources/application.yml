@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: account
+  profiles:
+    default: local
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+server:
+  port: ${SERVER_PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+# Writes console logs as structured JSON in a Logstash-compatible format.
+# The request ID filter places the current request ID in the logging MDC, so it can be included in request logs.
+logging:
+  structured:
+    format:
+      console: logstash
+
+
+springdoc:
+  api-docs:
+    version: openapi_3_1
+  # Disables the interactive Swagger UI page. The generated API document remains available at /v3/api-docs.yaml, which the export script fetches.
+  swagger-ui:
+    enabled: false

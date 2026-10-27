@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${ACCOUNT_DB_URL:jdbc:postgresql://localhost:55432/account_db}
+    username: ${ACCOUNT_DB_USER:account}
+    password: ${ACCOUNT_DB_PASSWORD:account_local_password}
