@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${MEDIA_DB_URL:jdbc:postgresql://localhost:55432/media_db}
+    username: ${MEDIA_DB_USER:media}
+    password: ${MEDIA_DB_PASSWORD:media_local_password}

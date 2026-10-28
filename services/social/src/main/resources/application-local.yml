@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${SOCIAL_DB_URL:jdbc:postgresql://localhost:55432/social_db}
+    username: ${SOCIAL_DB_USER:social}
+    password: ${SOCIAL_DB_PASSWORD:social_local_password}

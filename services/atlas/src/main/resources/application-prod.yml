@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${ATLAS_DB_URL}
+    username: ${ATLAS_DB_USER}
+    password: ${ATLAS_DB_PASSWORD}

@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: media
+  profiles:
+    default: local
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+server:
+  port: ${SERVER_PORT:8083}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+logging:
+  structured:
+    format:
+      console: logstash
+
+springdoc:
+  api-docs:
+    version: openapi_3_1
+  swagger-ui:
+    enabled: false

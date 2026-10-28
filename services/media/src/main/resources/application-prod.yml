@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${MEDIA_DB_URL}
+    username: ${MEDIA_DB_USER}
+    password: ${MEDIA_DB_PASSWORD}

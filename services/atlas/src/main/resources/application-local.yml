@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${ATLAS_DB_URL:jdbc:postgresql://localhost:55432/atlas_db}
+    username: ${ATLAS_DB_USER:atlas}
+    password: ${ATLAS_DB_PASSWORD:atlas_local_password}

@@ -1,0 +1,5 @@
+spring:
+  datasource:
+    url: ${SOCIAL_DB_URL}
+    username: ${SOCIAL_DB_USER}
+    password: ${SOCIAL_DB_PASSWORD}

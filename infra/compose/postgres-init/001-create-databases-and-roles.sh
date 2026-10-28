@@ -26,3 +26,9 @@ SELECT format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', :'database_name')\gex
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'database_name', :'role_name')\gexec
 SQL
 done
+
+# Install PostGIS in Atlas's database as the cluster bootstrap superuser.
+# Application services keep their database-specific, non-superuser roles.
+psql --username "$POSTGRES_USER" --dbname atlas_db \
+  --set ON_ERROR_STOP=1 \
+  --command 'CREATE EXTENSION IF NOT EXISTS postgis;'
