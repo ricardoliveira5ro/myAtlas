@@ -1,10 +1,10 @@
 # API types placeholder
 
-This directory is reserved for TypeScript types generated from the OpenAPI
-documents in `contracts/openapi/`. The documents and generator are not available
-yet: service OpenAPI exports are planned for M3, and the `make contracts`
-generation command is planned for M5.
+TypeScript types in this directory are generated from the OpenAPI documents in
+`contracts/openapi/`. Run `make contracts` from the repository root to refresh
+the contracts and regenerate `account.ts`, `atlas.ts`, `media.ts`, and
+`social.ts`.
 
-When M5 is implemented, web code can import the generated types from this
-directory. Until then, do not create hand-maintained request or response types;
-that would duplicate the API contract.
+Import the service-specific `paths` type from `@/lib/api` when describing API
+endpoints (for example, `AccountPaths`). Do not edit generated files or create
+duplicate hand-maintained API request and response types.

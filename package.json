@@ -6,5 +6,11 @@
   ],
   "engines": {
     "node": ">=24"
+  },
+  "scripts": {
+    "contracts:types": "bash scripts/generate-api-types.sh"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0"
   }
 }

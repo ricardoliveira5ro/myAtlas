@@ -32,7 +32,11 @@ build: ## Build all services and the web application
 	@printf 'build: not wired yet (see M3.2 and M6)\n'
 
 contracts: ## Export OpenAPI documents and generate TypeScript types
-	@printf 'contracts: not wired yet (see M5.1)\n'
+	bash services/account/scripts/export-openapi.sh
+	bash services/atlas/scripts/export-openapi.sh
+	bash services/media/scripts/export-openapi.sh
+	bash services/social/scripts/export-openapi.sh
+	npm run contracts:types
 
 infra-validate: ## Validate the Terraform skeleton (fmt + validate)
 	@printf 'infra-validate: not wired yet (see M8.2)\n'

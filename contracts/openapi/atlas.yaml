@@ -1,0 +1,38 @@
+openapi: 3.1.0
+info:
+  title: MyAtlas Atlas API
+  description: Atlas and identity service API
+  version: v1
+servers:
+- url: http://localhost:8082
+  description: Generated server url
+paths:
+  /api/v1/atlas/ping:
+    get:
+      tags:
+      - info-controller
+      operationId: ping
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+  /api/v1/atlas/info:
+    get:
+      tags:
+      - info-controller
+      operationId: info
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+components: {}
