@@ -1,0 +1,8 @@
+extends:
+  - recommended
+
+rules:
+  # The repository has not selected a license for its API contracts yet.
+  info-license: off
+  # The current walking-skeleton operations have no meaningful 4XX responses.
+  operation-4xx-response: off

@@ -11,6 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Check Atlas service availability */
         get: operations["ping"];
         put?: never;
         post?: never;
@@ -27,6 +28,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Get Atlas service information */
         get: operations["info"];
         put?: never;
         post?: never;

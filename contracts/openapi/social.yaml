@@ -4,13 +4,14 @@ info:
   description: Social service API
   version: v1
 servers:
-- url: http://localhost:8084
-  description: Generated server url
+- url: /
+  description: Relative API root
 paths:
   /api/v1/social/ping:
     get:
       tags:
       - info-controller
+      summary: Check social service availability
       operationId: ping
       responses:
         "200":
@@ -21,10 +22,12 @@ paths:
                 type: object
                 additionalProperties:
                   type: string
+      security: []
   /api/v1/social/info:
     get:
       tags:
       - info-controller
+      summary: Get social service information
       operationId: info
       responses:
         "200":
@@ -35,4 +38,5 @@ paths:
                 type: object
                 additionalProperties:
                   type: string
+      security: []
 components: {}
