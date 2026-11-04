@@ -14,9 +14,7 @@ class TestcontainersConfiguration {
 	PostgreSQLContainer postgresContainer() {
 		return new PostgreSQLContainer(
 				DockerImageName.parse("postgis/postgis:18-3.6").asCompatibleSubstituteFor("postgres"))
-					.withDatabaseName("social_db")
-					.withUsername("social")
-					.withPassword("social_test_password");
+				.withDatabaseName("social_db").withUsername("social").withPassword("social_test_password");
 	}
 
 }

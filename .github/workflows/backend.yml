@@ -1,0 +1,75 @@
+name: Backend CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: ${{ matrix.service }} checks
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false # if one service fails, GitHub still lets the other three finish
+      matrix:
+        service: [account, atlas, media, social]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-dependency-path: services/${{ matrix.service }}/pom.xml
+
+      # Checks if the Java files follow the formatting rules configured in the service’s
+      - name: Check Java formatting
+        # `-B` makes Maven use a quiet, noninteractive mode suited to CI. `-ntp` suppresses download progress bars.
+        run: ./mvnw -B -ntp spotless:check
+
+      # Examines compiled Java code for patterns that might indicate bugs
+      - name: Run SpotBugs analysis
+        run: ./mvnw -B -ntp -DskipTests package spotbugs:check
+
+      - name: Run tests with Testcontainers
+        run: ./mvnw -B -ntp test
+
+      - name: Set up Node.js 24 for contract validation
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install contract tooling
+        run: npm ci
+        working-directory: .
+
+      - name: Validate this service's OpenAPI contract
+        run: ./node_modules/.bin/redocly lint "contracts/openapi/${{ matrix.service }}.yaml"
+        working-directory: .
+
+  # Job that checks dependencies changed by the pull request for known vulnerabilities
+  dependency-review:
+    name: Review dependency changes
+    runs-on: ubuntu-24.04
+    needs: service # waits until all four service checks have passed
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Check changed dependencies for vulnerabilities
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: moderate
+          fail-on-scopes: runtime, development

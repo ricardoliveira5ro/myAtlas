@@ -14,10 +14,9 @@ public class SecurityConfiguration {
 		http.authorizeHttpRequests(authorize -> authorize
 				.requestMatchers("/api/v1/identity/info", "/api/v1/identity/ping", "/v3/api-docs.yaml",
 						"/v3/api-docs/**", "/actuator/health", "/actuator/health/**")
-				.permitAll()
-				.anyRequest().authenticated());
+				.permitAll().anyRequest().authenticated());
 		http.httpBasic(Customizer.withDefaults());
-    
+
 		return http.build();
 	}
 }

@@ -13,11 +13,7 @@ public class OpenApiConfiguration {
 
 	@Bean
 	OpenAPI socialOpenApi() {
-		return new OpenAPI()
-				.servers(List.of(new Server().url("/").description("Relative API root")))
-				.info(new Info()
-				.title("MyAtlas Social API")
-				.version("v1")
-				.description("Social service API"));
+		return new OpenAPI().servers(List.of(new Server().url("/").description("Relative API root")))
+				.info(new Info().title("MyAtlas Social API").version("v1").description("Social service API"));
 	}
 }

@@ -27,9 +27,7 @@ class AccountServiceIntegrationTests {
 	@Container
 	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
 			DockerImageName.parse("postgis/postgis:18-3.6").asCompatibleSubstituteFor("postgres"))
-				.withDatabaseName("account_db")
-				.withUsername("account")
-				.withPassword("account_test_password");
+			.withDatabaseName("account_db").withUsername("account").withPassword("account_test_password");
 
 	@DynamicPropertySource
 	static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -55,9 +53,7 @@ class AccountServiceIntegrationTests {
 	void pingReturnsRequestIdAndHealthyResponse() throws Exception {
 		String suppliedRequestId = UUID.randomUUID().toString();
 		HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/identity/ping"))
-				.header("X-Request-ID", suppliedRequestId)
-				.GET()
-				.build();
+				.header("X-Request-ID", suppliedRequestId).GET().build();
 		HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
 
 		assertThat(response.statusCode()).isEqualTo(200);

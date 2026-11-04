@@ -36,9 +36,7 @@ class SocialServiceIntegrationTests {
 	void pingReturnsRequestIdAndHealthyResponse() throws Exception {
 		String suppliedRequestId = UUID.randomUUID().toString();
 		HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/social/ping"))
-				.header("X-Request-ID", suppliedRequestId)
-				.GET()
-				.build();
+				.header("X-Request-ID", suppliedRequestId).GET().build();
 		HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
 
 		assertThat(response.statusCode()).isEqualTo(200);

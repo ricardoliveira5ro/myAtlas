@@ -13,11 +13,7 @@ public class OpenApiConfiguration {
 
 	@Bean
 	OpenAPI atlasOpenApi() {
-		return new OpenAPI()
-				.servers(List.of(new Server().url("/").description("Relative API root")))
-				.info(new Info()
-				.title("MyAtlas Atlas API")
-				.version("v1")
-				.description("Atlas and identity service API"));
+		return new OpenAPI().servers(List.of(new Server().url("/").description("Relative API root"))).info(
+				new Info().title("MyAtlas Atlas API").version("v1").description("Atlas and identity service API"));
 	}
 }

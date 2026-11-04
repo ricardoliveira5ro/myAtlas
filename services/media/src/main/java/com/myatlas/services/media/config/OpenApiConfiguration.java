@@ -13,11 +13,7 @@ public class OpenApiConfiguration {
 
 	@Bean
 	OpenAPI mediaOpenApi() {
-		return new OpenAPI()
-				.servers(List.of(new Server().url("/").description("Relative API root")))
-				.info(new Info()
-				.title("MyAtlas Media API")
-				.version("v1")
-				.description("Media service API"));
+		return new OpenAPI().servers(List.of(new Server().url("/").description("Relative API root")))
+				.info(new Info().title("MyAtlas Media API").version("v1").description("Media service API"));
 	}
 }

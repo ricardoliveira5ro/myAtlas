@@ -27,8 +27,8 @@ class AtlasServiceIntegrationTests {
 	@Test
 	void flywayAppliesAtlasBaselineToPostgisDatabase() {
 		Integer rows = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM atlas_service_marker", Integer.class);
-		Integer postgisInstalled = jdbcTemplate.queryForObject(
-				"SELECT COUNT(*) FROM pg_extension WHERE extname = 'postgis'", Integer.class);
+		Integer postgisInstalled = jdbcTemplate
+				.queryForObject("SELECT COUNT(*) FROM pg_extension WHERE extname = 'postgis'", Integer.class);
 
 		assertThat(rows).isEqualTo(1);
 		assertThat(postgisInstalled).isEqualTo(1);
@@ -38,9 +38,7 @@ class AtlasServiceIntegrationTests {
 	void pingReturnsRequestIdAndHealthyResponse() throws Exception {
 		String suppliedRequestId = UUID.randomUUID().toString();
 		HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/atlas/ping"))
-				.header("X-Request-ID", suppliedRequestId)
-				.GET()
-				.build();
+				.header("X-Request-ID", suppliedRequestId).GET().build();
 		HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
 
 		assertThat(response.statusCode()).isEqualTo(200);

@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Assigns each HTTP request a traceable ID so the same request can be identified in response headers and application logs.
+ * Assigns each HTTP request a traceable ID so the same request can be
+ * identified in response headers and application logs.
  */
 @Component
 public class RequestIdFilter extends OncePerRequestFilter {
@@ -22,7 +23,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
 	private static final String UUID_PATTERN = "(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
 	@Override
-	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+			throws ServletException, IOException {
 		String requestId = validRequestId(request.getHeader(HEADER_NAME));
 		if (requestId == null) {
 			requestId = UUID.randomUUID().toString();

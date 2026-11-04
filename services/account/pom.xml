@@ -112,6 +112,33 @@
 
 	<build>
 		<plugins>
+      <!-- Spotless checks that Java files follow the Eclipse formatter’s rules. -->
+			<plugin>
+				<groupId>com.diffplug.spotless</groupId>
+				<artifactId>spotless-maven-plugin</artifactId>
+				<version>3.10.4</version>
+				<configuration>
+					<java>
+						<eclipse>
+							<version>4.41</version>
+						</eclipse>
+					</java>
+				</configuration>
+			</plugin>
+      <!-- SpotBugs examines the compiled Java code for patterns that may indicate bugs -->
+			<plugin>
+				<groupId>com.github.spotbugs</groupId>
+				<artifactId>spotbugs-maven-plugin</artifactId>
+				<version>4.10.5.0</version>
+				<configuration>
+          <!-- asks it to do its most thorough analysis -->
+					<effort>Max</effort>
+          <!-- sets the minimum finding severity -->
+					<threshold>Medium</threshold>
+          <!-- makes Maven report failure if it finds qualifying issues -->
+					<failOnError>true</failOnError>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>

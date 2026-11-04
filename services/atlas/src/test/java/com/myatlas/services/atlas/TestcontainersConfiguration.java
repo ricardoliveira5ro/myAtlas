@@ -14,9 +14,7 @@ class TestcontainersConfiguration {
 	PostgreSQLContainer postgisContainer() {
 		return new PostgreSQLContainer(
 				DockerImageName.parse("postgis/postgis:18-3.6").asCompatibleSubstituteFor("postgres"))
-					.withDatabaseName("atlas_db")
-					.withUsername("atlas")
-					.withPassword("atlas_test_password")
-					.withInitScript("atlas-postgis-init.sql");
+				.withDatabaseName("atlas_db").withUsername("atlas").withPassword("atlas_test_password")
+				.withInitScript("atlas-postgis-init.sql");
 	}
 }
