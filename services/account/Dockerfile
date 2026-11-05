@@ -2,7 +2,7 @@
 # 2 stages: one builds the application and the other assembles the smaller runtime image.
 
 # Starts with an image that has Maven and Java 25 installed. 
-FROM maven:3.9.11-eclipse-temurin-25 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 WORKDIR /workspace
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
