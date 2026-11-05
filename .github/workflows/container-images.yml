@@ -49,7 +49,7 @@ jobs:
       # We set push:false because only checks that images build; it does not publish them to a registry.
       # GitHub Actions cache stores reusable Docker build layers separately for each app to speed up later pull-request runs.
       - name: Build image for AMD64 and ARM64
-        uses: docker/build-push-action@v7.2.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
