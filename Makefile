@@ -16,22 +16,40 @@ dev-infra: ## Start local infrastructure (Postgres/PostGIS + Mailpit)
 dev-infra-down: ## Stop and remove local infrastructure
 	docker compose down
 
-dev: ## Run the application locally (services + web shell)
-	@printf 'dev: not wired yet (see M3.2 and M4)\n'
+dev: dev-infra ## Start local infrastructure, backend services, and web app
+	bash scripts/dev.sh
 
-format: ## Format Java and TypeScript/JavaScript sources
-	@printf 'format: not wired yet (see M3.2 and M6)\n'
+format: ## Format Java and apply ESLint auto-fixes to web sources
+	@set -e; for service in account atlas media social; do \
+		printf '\nFormatting %s service...\n' "$$service"; \
+		(cd "services/$$service" && ./mvnw -B -ntp spotless:apply); \
+	done
+	npm run lint -w @my-atlas/web -- --fix
 
 lint: ## Run static analysis across the monorepo
-	@printf 'lint: not wired yet (see M6)\n'
+	@set -e; for service in account atlas media social; do \
+		printf '\nChecking %s service...\n' "$$service"; \
+		(cd "services/$$service" && ./mvnw -B -ntp spotless:check); \
+		(cd "services/$$service" && ./mvnw -B -ntp -DskipTests package spotbugs:check); \
+	done
+	npm run lint -w @my-atlas/web
+	npm run contracts:lint
 
 test: ## Run backend and web test suites
-	@printf 'test: not wired yet (see M3.2 and M6)\n'
+	@set -e; for service in account atlas media social; do \
+		printf '\nTesting %s service...\n' "$$service"; \
+		(cd "services/$$service" && ./mvnw -B -ntp test); \
+	done
+	npm run typecheck -w @my-atlas/web
 
 build: ## Build all services and the web application
-	@printf 'build: not wired yet (see M3.2 and M6)\n'
+	@set -e; for service in account atlas media social; do \
+		printf '\nBuilding %s service...\n' "$$service"; \
+		(cd "services/$$service" && ./mvnw -B -ntp -DskipTests package); \
+	done
+	npm run build -w @my-atlas/web
 
-contracts: ## Export OpenAPI documents and generate TypeScript types
+contracts: ## Export OpenAPI from running services and generate TypeScript types
 	bash services/account/scripts/export-openapi.sh
 	bash services/atlas/scripts/export-openapi.sh
 	bash services/media/scripts/export-openapi.sh
@@ -39,4 +57,10 @@ contracts: ## Export OpenAPI documents and generate TypeScript types
 	npm run contracts:types
 
 infra-validate: ## Validate the Terraform skeleton (fmt + validate)
-	@printf 'infra-validate: not wired yet (see M8.2)\n'
+	@if ! find infra/terraform -type f -name '*.tf' -print -quit | grep -q .; then \
+		printf 'No Terraform configuration found under infra/terraform; skipping until M8.2 adds it.\n'; \
+	else \
+		terraform -chdir=infra/terraform fmt -check -recursive && \
+		terraform -chdir=infra/terraform init -backend=false -input=false && \
+		terraform -chdir=infra/terraform validate; \
+	fi
