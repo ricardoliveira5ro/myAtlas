@@ -1,0 +1,59 @@
+name: Container image CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }} for AMD64 and ARM64
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: account
+            context: ./services/account
+            file: ./services/account/Dockerfile
+          - name: atlas
+            context: ./services/atlas
+            file: ./services/atlas/Dockerfile
+          - name: media
+            context: ./services/media
+            file: ./services/media/Dockerfile
+          - name: social
+            context: ./services/social
+            file: ./services/social/Dockerfile
+          - name: web
+            context: .
+            file: ./apps/web/Dockerfile
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      # GitHub's hosted runner is AMD64, but this workflow also builds ARM64 images.
+      # QEMU lets Buildx run ARM64 build steps (for example, commands after FROM)
+      # by emulating an ARM64 CPU on the AMD64 runner. It does not change the final
+      # image's architecture; Buildx still produces an ARM64 image for ARM64 hosts.
+      - name: Set up QEMU for ARM64 emulation
+        uses: docker/setup-qemu-action@v4.4.0
+
+      # Buildx is Docker's builder with multi-platform support. This action prepares
+      # it on the runner so the next step can request both AMD64 and ARM64 targets.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.4.1
+
+      # This builds the Dockerfile selected by the matrix entry above. The two platforms cover common Intel/AMD servers and ARM-based machines.
+      # We set push:false because only checks that images build; it does not publish them to a registry.
+      # GitHub Actions cache stores reusable Docker build layers separately for each app to speed up later pull-request runs.
+      - name: Build image for AMD64 and ARM64
+        uses: docker/build-push-action@v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
