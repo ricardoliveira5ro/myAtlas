@@ -1,0 +1,71 @@
+version: 2
+updates:
+  # Keep the four independently built Spring Boot services' Maven dependencies current.
+  - package-ecosystem: maven
+    directory: /services/account
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: maven
+    directory: /services/atlas
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: maven
+    directory: /services/media
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: maven
+    directory: /services/social
+    schedule:
+      interval: weekly
+      day: monday
+
+  # The npm workspace is rooted here; Dependabot checks root and workspace manifests.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+
+  # Keep versions used in GitHub Actions workflow files current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+
+  # Track the pinned base images used by each Dockerfile.
+  - package-ecosystem: docker
+    directory: /services/account
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: docker
+    directory: /services/atlas
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: docker
+    directory: /services/media
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: docker
+    directory: /services/social
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: docker
+    directory: /apps/web
+    schedule:
+      interval: weekly
+      day: monday
