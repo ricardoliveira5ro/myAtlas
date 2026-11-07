@@ -48,6 +48,10 @@ ADRs in `docs/adr/` record accepted project decisions. The Technical Design
 marks decisions as confirmed, recommended, or open; do not treat a recommended
 or open item as an approved product decision.
 
+For request IDs, service logs, health endpoints, and the future Media quota
+counter inspection procedure, see
+[`docs/operations/observability.md`](docs/operations/observability.md).
+
 ## 3. Run the project locally
 
 From the repository root:

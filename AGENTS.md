@@ -14,6 +14,8 @@ constraints first; this file supplies repository-specific context.
   `docs/planning/stage-1-foundation-plan.md` for milestone scope.
 - Use `docs/engineering/conventions.md` and
   `docs/engineering/service-archetype.md` for backend implementation rules.
+- Use `docs/operations/observability.md` for request-ID logging, health
+  endpoint behavior, and the current status of the planned Media counters.
 
 ## Service and data ownership
 
