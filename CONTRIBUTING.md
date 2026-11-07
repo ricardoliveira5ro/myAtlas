@@ -131,7 +131,7 @@ Run the relevant checks from the repository root. The complete command set is:
 | `make test` | Runs all backend tests with Testcontainers and typechecks the web app. Docker must be available for backend integration tests. |
 | `make build` | Packages all four Java services and makes a production web build. |
 | `make contracts` | Exports OpenAPI from all four running services and regenerates web API types. |
-| `make infra-validate` | Checks Terraform when `.tf` files exist; currently skips because the M8.2 Terraform skeleton is not present yet. |
+| `make infra-validate` | Checks Terraform formatting, initializes the pinned provider without a remote backend, and validates the configuration. The current skeleton defines no resources, so it provisions nothing. |
 
 For a focused backend check, run a Maven Wrapper command from that service's
 directory, for example:

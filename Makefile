@@ -56,11 +56,11 @@ contracts: ## Export OpenAPI from running services and generate TypeScript types
 	bash services/social/scripts/export-openapi.sh
 	npm run contracts:types
 
-infra-validate: ## Validate the Terraform skeleton (fmt + validate)
+infra-validate: ## Format and validate Terraform without provisioning resources
 	@if ! find infra/terraform -type f -name '*.tf' -print -quit | grep -q .; then \
-		printf 'No Terraform configuration found under infra/terraform; skipping until M8.2 adds it.\n'; \
+		printf 'No Terraform configuration found under infra/terraform; nothing to validate.\n'; \
 	else \
 		terraform -chdir=infra/terraform fmt -check -recursive && \
-		terraform -chdir=infra/terraform init -backend=false -input=false && \
+		terraform -chdir=infra/terraform init -backend=false -input=false -lockfile=readonly && \
 		terraform -chdir=infra/terraform validate; \
 	fi

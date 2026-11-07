@@ -6,6 +6,15 @@ target/
 .next/
 dist/
 
+# Terraform local state, provider cache, crash logs, and local variable files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+
 # Environment
 .env
 .env.*
