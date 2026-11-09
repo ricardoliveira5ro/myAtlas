@@ -1,5 +1,5 @@
 # Build the Next.js app with the same Node.js 24 line used by local development.
-FROM node:24.22.1-bookworm-slim AS build
+FROM node:26.13.0-bookworm-slim AS build
 WORKDIR /workspace
 
 # Install all workspace dependencies from the repository lockfile.
@@ -13,7 +13,7 @@ WORKDIR /workspace/apps/web
 RUN npm run build
 
 # Run the production server in a separate, non-root runtime image.
-FROM node:24.22.1-bookworm-slim AS runtime
+FROM node:26.13.0-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
