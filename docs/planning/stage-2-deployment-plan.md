@@ -53,7 +53,7 @@ The plan is written for the human owner to execute task by task, top to bottom, 
 | Domain and DNS | `myatlas.services` bought at GoDaddy. Keep GoDaddy DNS. No Cloudflare proxy. | All DNS changes happen in GoDaddy; Caddy terminates TLS directly. |
 | Hostname | Apex `myatlas.services` is canonical. `www.myatlas.services` redirects to the apex with HTTP `301`. | Caddy serves both names and returns `301` for `www`; canonical links use the apex. |
 | Tenancy | OCI Always Free-only (was trial, now Always Free), home region UK South (London), 3 availability domains. No paid upgrade. | Provision only after verifying limits; retry across ADs on capacity failure. |
-| Compute | One `VM.Standard.A1.Flex`, 2 OCPU / 12 GB, Ubuntu 24.04 ARM64, 50 GB boot + 150 GB block volume (200 GB Always Free total). | Single host, no high availability; block volume holds Docker data and backup staging. |
+| Compute | One `VM.Standard.A1.Flex`, 1 OCPU / 6 GB, Ubuntu 24.04 ARM64, default boot volume (about 46.6 GB) + 150 GB block volume (196.6 GB used against the 200 GB Always Free cap). | Single host, no high availability; limited memory headroom; block volume holds Docker data and backup staging. |
 | Network | One VCN, public subnet, internet gateway, reserved public IP. Security list: ingress 22 from owner IP only, 80/443 from anywhere, no 3000, 5432, 8080, or 8081–8084. Host firewall mirrors this. | Only Caddy is reachable publicly; web, database, and service ports are never published. |
 | Stack | Docker Engine + Compose. Services: `caddy`, `web`, `account`, `atlas`, `media`, `social`, `postgres` (PostGIS). Only Caddy publishes 80/443. Internal network only for the rest. | Compose uses one application network with no published ports except Caddy; outbound HTTPS remains available for Resend and OCI. |
 | Images | Build ARM64 images on the VM from a git clone for the first deploy. A CI registry publish (GHCR/OCIR) is a follow-up, not a Stage 2 blocker. | The VM builds and tags images locally; no registry credentials are needed for Stage 2. |
@@ -61,7 +61,7 @@ The plan is written for the human owner to execute task by task, top to bottom, 
 | Email | Resend Free (3,000/month, 100/day), domain verification via GoDaddy DNS, SPF/DKIM/DMARC, sender `no-reply@myatlas.services`. OCI Email Delivery is excluded because Always Free-only shows 0/day. | Stage 2 verifies Resend delivery from the VM; application adapter integration is a Stage 3 dependency, documented now. |
 | Media | Fully deferred to Stage 5. Stage 2 does **not** implement uploads, processing, or the request-budget ledger/guard. The Stage 2 exit check about storage/request-budget exhaustion is explicitly deferred to Stage 5. Stage 2 instead verifies private Object Storage and no public bucket access. | The media container runs as a healthy skeleton; no media bucket or upload path is required in Stage 2. |
 | Backups | Nightly `pg_dump` per database, encrypted with `age` (public key on VM, private key offline), uploaded to private `myatlas-backups` bucket. Preferred auth: OCI instance principal (dynamic group + scoped policy); fallback dedicated least-privilege API key. Retention 7 daily + up to 4 weekly (28 days). Monthly restore rehearsal into a clean local Postgres/PostGIS container. | Backup scripts, systemd timer, bucket lifecycle, and a restore rehearsal are Stage 2 deliverables. |
-| Resource ceilings | Caddy 256 MiB; web 1 GiB; account 768 MiB; atlas 768 MiB; media 1 GiB; social 512 MiB; Postgres 2 GiB; leave ~3 GiB headroom. JVM `-Xmx`: account/atlas/media 384 MiB, social 256 MiB. Hikari pool 5; Postgres `max_connections=40`. | Compose sets `mem_limit`, `JAVA_TOOL_OPTIONS`, Hikari pool, and Postgres connection limit; monitor with `docker stats`. |
+| Resource ceilings | Caddy 128 MiB; web 512 MiB; account 512 MiB; atlas 512 MiB; media 512 MiB; social 384 MiB; Postgres 1 GiB; leave ~1 GiB headroom. JVM `-Xmx`: account/atlas/media 320 MiB, social 256 MiB. Hikari pool 5; Postgres `max_connections=40`. | Compose sets `mem_limit`, `JAVA_TOOL_OPTIONS`, Hikari pool, and Postgres connection limit; monitor with `docker stats`. |
 | Observability | JSON logs to stdout, Docker `json-file` rotation (10m × 3), Caddy access logs, request IDs, internal-only health endpoints, documented commands for `compose ps`/`logs`, `df -h`, `docker stats`, `docker system df`. Optional free external uptime monitor. | Production commands are added to `docs/operations/observability.md`; no Prometheus/Grafana stack is added. |
 | Validation/acceptance | Valid HTTPS, HTTP and `www` redirects, all four ping endpoints 200 with `X-Request-ID`, unknown API 404, Actuator blocked externally, ports 3000, 5432, 8080, and 8081–8084 closed externally, Compose all healthy, Flyway applied, reboot recovery, Resend test email delivered, backup/restore proven, Limits page within caps, capacity/idle runbooks written. | M8 maps every item to evidence in `docs/operations/stage-2-verification.md`. |
 | Runbooks | First deploy, update deploy, restart, rollback image tag, restore DB, disk pressure/Docker cleanup, Object Storage/quota pressure, email outage, TLS probe and rollback, TLS renewal failure, SSH/UFW lockout recovery, UK South capacity failure, idle-instance reclamation recovery. | `docs/operations/runbook.md` is a Stage 2 deliverable with symptoms, checks, commands, and expected output. |
@@ -144,18 +144,18 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
 ### M0 — Stage 0 closure and tenancy verification gate
 
 - **M0.1 — Verify tenancy type, home region, and availability domains.**
-  - **Deliverable:** A "Tenancy baseline" section in `docs/operations/stage-2-verification.md` recording tenancy OCID, tenancy type (Always Free), home region, and the three availability-domain names.
+  - **Deliverable:** A "Tenancy baseline" section in `docs/operations/stage-2-verification.md` recording tenancy OCID, tenancy type (Always Free; `oci iam tenancy get` does not expose a free-tier flag, so the M0.2 Limits/Usage baseline confirms it), home region, and the three availability-domain names.
   - **Commands:**
     ```sh
     oci iam tenancy get --tenancy-id <TENANCY_OCID>
     oci iam region-subscription list --tenancy-id <TENANCY_OCID>
     oci iam availability-domain list --compartment-id <TENANCY_OCID>
     ```
-  - **Expected:** Tenancy output shows the Always Free state; region subscription shows home region `uk-lon-1` (UK South); availability-domain output lists three ADs.
-  - **Acceptance:** The verification note contains the three facts above and the exact AD names used in subsequent milestones. No resource is created in M0.
+  - **Expected:** Tenancy output shows the tenancy OCID, name, and home-region key `LHR`; the CLI does not expose an Always Free flag, so M0.2 confirms the tenancy type. Region subscription shows home region `uk-london-1` (UK South) with `is-home-region: true`; availability-domain output lists three ADs.
+  - **Acceptance:** The verification note contains the tenancy OCID, tenancy type, home region, and exact AD names used in subsequent milestones. No resource is created in M0.
 - **M0.2 — Capture the Always Free quota baseline.**
   - **Deliverable:** A "Quota baseline" table in the verification note with the values observed in OCI Console → Governance & Administration → Tenancy Management → Limits, Quotas and Usage.
-  - **Expected values:** Ampere A1 2 OCPU / 12 GB; block storage 200 GB total (boot + block); Object Storage 20 GB combined and 50,000 requests/month; outbound 10 TB/month; email 0/day for OCI Email Delivery under Always Free.
+  - **Expected values:** Ampere A1 Always Free allowance (record the exact tenancy value on the Limits page; this deployment uses 1 OCPU / 6 GB); block storage 200 GB cap (expected 196.6 GB: about 46.6 GB boot + 150 GB block); Object Storage 20 GB combined and 50,000 requests/month; outbound 10 TB/month; email 0/day for OCI Email Delivery under Always Free.
   - **Acceptance:** The table records each value. The note says to use OCI Billing & Cost Management and the Limits/Usage page as the authoritative checks; Cost Analysis availability may vary by tenancy.
 - **M0.3 — Confirm GoDaddy DNS control.**
   - **Deliverable:** A "DNS baseline" section recording the current apex A, `www` A/CNAME, NS, MX, and TXT records, plus the default TTL.
@@ -253,7 +253,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
   - **Expected:** The response contains `"lifetime": "RESERVED"`, `"lifecycle-state": "AVAILABLE"`, and an `ip-address`.
   - **Acceptance:** The reserved IP address is recorded in the verification note as `<RESERVED_PUBLIC_IP>` (a public value, not a secret).
 - **M1.3 — Provision the A1 instance.**
-  - **Deliverable:** One `VM.Standard.A1.Flex` instance named `myatlas-prod-01`, 2 OCPU / 12 GB, Ubuntu 24.04 ARM64, 50 GB boot volume, in one of the three UK South ADs.
+  - **Deliverable:** One `VM.Standard.A1.Flex` instance named `myatlas-prod-01`, 1 OCPU / 6 GB, Ubuntu 24.04 ARM64, the image-default boot volume (about 46.6 GB), in one of the three UK South ADs.
   - **Preflight — find the Ubuntu 24.04 ARM64 image:**
     ```sh
     oci compute image list \
@@ -271,17 +271,17 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
       --compartment-id <COMPARTMENT_OCID> \
       --availability-domain <AD_NAME> \
       --shape VM.Standard.A1.Flex \
-      --shape-config '{"ocpus":2,"memoryInGBs":12}' \
+      --shape-config '{"ocpus":1,"memoryInGBs":6}' \
       --image-id <UBUNTU_24_04_ARM64_IMAGE_OCID> \
       --display-name myatlas-prod-01 \
       --subnet-id <SUBNET_OCID> \
       --assign-public-ip true \
-      --ssh-authorized-keys-file <SSH_PUBLIC_KEY_PATH> \
-      --boot-volume-size-in-gbs 50
+      --ssh-authorized-keys-file <SSH_PUBLIC_KEY_PATH>
     ```
-  - **Expected:** The instance reaches `RUNNING`; `ssh -i <SSH_PRIVATE_KEY_PATH> ubuntu@<EPHEMERAL_PUBLIC_IP>` works; `uname -m` returns `aarch64`; `nproc` returns `2`; `free -g` shows about 12 GB; `lsblk` shows a 50 GB boot disk.
-  - **Capacity failure:** If UK South A1 capacity is unavailable, retry the same launch in the next AD. Provisioning may fail for days; do not upgrade to a paid shape. Record each failed attempt and the AD in the verification note.
-  - **Acceptance:** The instance is running on ARM64 with the requested shape, and the AD used is recorded.
+    Omit `--boot-volume-size-in-gbs` to use the image-default boot volume (about 46.6 GB); a larger boot volume would also fit the 200 GB cap but is not required.
+  - **Expected:** The instance reaches `RUNNING`; `ssh -i <SSH_PRIVATE_KEY_PATH> ubuntu@<EPHEMERAL_PUBLIC_IP>` works; `uname -m` returns `aarch64`; `nproc` returns `1`; `free -g` shows about 6 GB; `lsblk` shows a boot disk of about 46.6 GB.
+  - **Capacity failure:** The owner has already confirmed that the 2 OCPU / 12 GB shape is unavailable in all three UK South ADs. Probe 1 OCPU / 6 GB in the next AD. If 1 OCPU / 6 GB also fails in all three ADs, stop and choose between waiting/retrying A1 and a deliberately reduced Stage 2 Lite; do not use `VM.Standard.E2.1.Micro` for the full stack. Provisioning may fail for days; do not upgrade to a paid shape. Record each failed attempt, shape, and AD in the verification note.
+  - **Acceptance:** The instance is running on ARM64 with the requested 1 OCPU / 6 GB shape, and the AD used is recorded.
 - **M1.4 — Move the reserved public IP onto the instance.**
   - **Deliverable:** The reserved public IP is attached to the instance's primary VNIC; the temporary ephemeral public IP is released.
   - **Commands:**
@@ -322,7 +322,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
   - **On the VM:**
     ```sh
     lsblk -o NAME,SIZE,TYPE,MOUNTPOINT
-    # Confirm /dev/oracleoci/oraclevdb is the 150 GB volume, not the 50 GB boot disk.
+    # Confirm /dev/oracleoci/oraclevdb is the 150 GB volume, not the boot disk.
     sudo mkfs.ext4 /dev/oracleoci/oraclevdb
     sudo mkdir -p /srv/myatlas
     sudo blkid -s UUID -o value /dev/oracleoci/oraclevdb
@@ -348,7 +348,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
 
 - **M2.1 — Write and run the host bootstrap script.**
   - **Deliverable:** `scripts/deploy/bootstrap-host.sh` is idempotent and performs: `apt-get update`/`upgrade`, installs `ca-certificates`, `curl`, `gnupg`, `git`, `jq`, `age`, `ufw`, `shellcheck`, `python3-pip`, `pipx`, and Docker Engine, the Compose plugin, and the buildx plugin from Docker's Ubuntu ARM64 repository; enables Docker; installs the OCI CLI system-wide with `pipx install --global oci-cli` (fallback: `sudo python3 -m pip install --break-system-packages oci-cli` if the packaged pipx lacks `--global`); creates `/srv/myatlas/{app,docker,backups}`.
-  - **Safety check:** The script refuses to run unless `/srv/myatlas` is a mount point (`findmnt --mountpoint /srv/myatlas`). This prevents Docker data from being written to the 50 GB boot volume before the 150 GB block volume is mounted.
+  - **Safety check:** The script refuses to run unless `/srv/myatlas` is a mount point (`findmnt --mountpoint /srv/myatlas`). This prevents Docker data from being written to the boot volume before the 150 GB block volume is mounted.
   - **Commands:**
     ```sh
     findmnt --mountpoint /srv/myatlas
@@ -449,7 +449,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     systemctl show docker --property=After | tr ' ' '\n' | grep -x 'srv-myatlas.mount'
     ```
   - **Expected:** Docker root dir is `/srv/myatlas/docker`; logging driver is `json-file`; `RequiresMountsFor` shows `/srv/myatlas`; `After` includes `srv-myatlas.mount` (the systemd mount unit for `/srv/myatlas`).
-  - **Acceptance:** Docker data and container logs live on the block volume, not the 50 GB boot volume. With `nofail` in `/etc/fstab`, the systemd drop-in prevents Docker from starting against an unmounted boot-volume path; alternatively, remove `nofail` after verifying the volume is always present at boot. M8.6 checks `findmnt /srv/myatlas` after the reboot.
+  - **Acceptance:** Docker data and container logs live on the block volume, not the boot volume. With `nofail` in `/etc/fstab`, the systemd drop-in prevents Docker from starting against an unmounted boot-volume path; alternatively, remove `nofail` after verifying the volume is always present at boot. M8.6 checks `findmnt /srv/myatlas` after the reboot.
 - **M2.5 — Set UTC time sync and a bounded swap file.**
   - **Deliverable:** UTC timezone, `systemd-timesyncd` enabled, and a 2 GB swap file on the boot volume persisted in `/etc/fstab` with an idempotent `grep -q` guard.
   - **Commands:**
@@ -566,7 +566,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
             condition: service_healthy
         networks:
           - application
-        mem_limit: 256m
+        mem_limit: 128m
         logging: *default-logging
         healthcheck:
           test: ["CMD", "caddy", "version"]
@@ -576,8 +576,8 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
         restart: unless-stopped
       ```
     - Set the `postgres` service image to `postgis/postgis:18-3.6@sha256:<POSTGIS_DIGEST>`.
-    - Add `logging: *default-logging` and `mem_limit` to every service: web `1g`, account `768m`, atlas `768m`, media `1g`, social `512m`, postgres `2g`.
-    - Add `JAVA_TOOL_OPTIONS` to the four Spring services: `-Xmx384m` for account/atlas/media, `-Xmx256m` for social.
+    - Add `logging: *default-logging` and `mem_limit` to every service: web `512m`, account `512m`, atlas `512m`, media `512m`, social `384m`, postgres `1g`.
+    - Add `JAVA_TOOL_OPTIONS` to the four Spring services: `-Xmx320m` for account/atlas/media, `-Xmx256m` for social.
     - Add `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"` to the four Spring services.
     - Add `command: ["postgres", "-c", "max_connections=40"]` and `shm_size: 256mb` to postgres.
     - Remove the `web` service's published port. Web is reachable only as `web:3000` on the `application` network.
@@ -721,7 +721,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     | --- | --- | --- |
     | `infra/compose/.env.production` | `APP_DOMAIN`, `WWW_DOMAIN`, `ACME_EMAIL`, `IMAGE_REGISTRY`, `IMAGE_TAG`, `POSTGRES_ADMIN_USER`, `POSTGRES_ADMIN_PASSWORD`, `ACCOUNT_DB_PASSWORD`, `ATLAS_DB_PASSWORD`, `MEDIA_DB_PASSWORD`, `SOCIAL_DB_PASSWORD` | Consumed by Compose. Mode 600, owned by `deploy`, never committed. |
     | `infra/compose/.env.production` | `APP_BASE_URL`, `APP_PUBLIC_BASE_URL`, `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY` | Reserved for Stage 3 application configuration where Compose does not pass them. Stage 2 M5.3 reads only `RESEND_API_KEY` directly from this file for the test script. |
-    | `/etc/myatlas/backup.env` | `AGE_PUBLIC_KEY`, `BACKUP_BUCKET=myatlas-backups`, `OCI_CLI_AUTH` (`instance_principal`, or `api_key` in the fallback), `OCI_CLI_REGION=uk-lon-1`, `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>`, and `OCI_CLI_CONFIG_FILE` when the fallback API key is used | Consumed only by the systemd backup service. Mode 600. |
+    | `/etc/myatlas/backup.env` | `AGE_PUBLIC_KEY`, `BACKUP_BUCKET=myatlas-backups`, `OCI_CLI_AUTH` (`instance_principal`, or `api_key` in the fallback), `OCI_CLI_REGION=uk-london-1`, `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>`, and `OCI_CLI_CONFIG_FILE` when the fallback API key is used | Consumed only by the systemd backup service. Mode 600. |
     | `/etc/myatlas/oci/config` | OCI CLI profile for fallback API-key auth, including `region` and `namespace` when they are stored here instead of `backup.env` | Created only when instance principal is unavailable. Owns the API-key credentials; `OCI_CLI_CONFIG_FILE` in `backup.env` points to it. `deploy:deploy` mode 600 or `root:deploy` mode 640. |
   - **Ownership rule:** Each variable has exactly one owning file. Compose reads only `infra/compose/.env.production`; systemd reads only `/etc/myatlas/backup.env`; the OCI CLI reads `/etc/myatlas/oci/config` only when the fallback API key is used. Do not duplicate secrets across files.
   - **Also modify `.gitignore`:** add `!infra/compose/.env.production.example` after the `.env.*` rule so the example is tracked while `.env.production` remains ignored.
@@ -797,8 +797,8 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T postgres \
       psql -U postgres -d postgres -c 'show max_connections;'
     ```
-  - **Expected:** `free -h` records the host's total and available memory; `docker stats` shows each container under its `mem_limit`; account/atlas/media print `-Xmx384m`, social prints `-Xmx256m`; the effective `MaxHeapSize` is close to each configured `-Xmx` (record the exact effective bytes per service from this command output); `max_connections` is `40`.
-  - **Acceptance:** The limits match the decisions table, the effective `MaxHeapSize` values and the `free -h` host available memory are recorded in the verification note, and the host retains at least ~3 GiB headroom.
+  - **Expected:** `free -h` records the host's total and available memory; `docker stats` shows each container under its `mem_limit`; account/atlas/media print `-Xmx320m`, social prints `-Xmx256m`; the effective `MaxHeapSize` is close to each configured `-Xmx` (record the exact effective bytes per service from this command output); `max_connections` is `40`.
+  - **Acceptance:** The limits match the decisions table, the effective `MaxHeapSize` values and the `free -h` host available memory are recorded in the verification note, and the host retains at least ~1 GiB headroom.
 - **M4.8 — Protect the production environment file.**
   - **Deliverable:** `.env.production` is ignored by Git, mode 600, owned by `deploy`, and never copied into an image.
   - **Commands:**
@@ -976,7 +976,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
       sudo grep -q '^OCI_CLI_AUTH=api_key$' /etc/myatlas/backup.env
       sudo grep -q '^OCI_CLI_CONFIG_FILE=/etc/myatlas/oci/config$' /etc/myatlas/backup.env
       ```
-  - **Region and namespace:** `OCI_CLI_REGION=uk-lon-1` and `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>` belong in `/etc/myatlas/backup.env`; if the fallback OCI config stores them instead, record that ownership in the verification note and do not duplicate them in both files.
+  - **Region and namespace:** `OCI_CLI_REGION=uk-london-1` and `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>` belong in `/etc/myatlas/backup.env`; if the fallback OCI config stores them instead, record that ownership in the verification note and do not duplicate them in both files.
   - **Policy test (instance principal):** From the VM, run `oci os object put --auth "${OCI_CLI_AUTH:-instance_principal}" --bucket-name myatlas-backups --name iam-test.txt --file /etc/hostname`, then `oci os object list --auth "${OCI_CLI_AUTH:-instance_principal}" --bucket-name myatlas-backups`, then `oci os object delete --auth "${OCI_CLI_AUTH:-instance_principal}" --bucket-name myatlas-backups --name iam-test.txt --force`. The same commands against any other bucket must fail; do not broaden the instance-principal policy to make them pass.
   - **Policy test (fallback API key):** When the fallback path is used, export the API-key environment in the current shell before rerunning the put/list/delete sequence as `deploy`: `export OCI_CLI_AUTH=api_key OCI_CLI_CONFIG_FILE=/etc/myatlas/oci/config` (or prefix each `oci` command with `env OCI_CLI_AUTH=api_key OCI_CLI_CONFIG_FILE=/etc/myatlas/oci/config`). Setting these values only in `/etc/myatlas/backup.env` is not enough because that file is read by the systemd service, not by the interactive shell. Then run the same put/list/delete sequence with `--auth "${OCI_CLI_AUTH:-instance_principal}"`; the explicitly exported `OCI_CLI_AUTH=api_key` makes the test use API-key auth instead of instance principal. All three operations must succeed for `myatlas-backups` and fail for any other bucket; do not broaden either policy to make them pass. Record both test outcomes in the verification note.
   - **Acceptance:** `oci os bucket get --bucket-name myatlas-backups` shows `NoPublicAccess`; `oci iam dynamic-group get --dynamic-group-id <DYNAMIC_GROUP_OCID>` shows the expected matching rule; the instance-principal put/list/delete policy test succeeds only for `myatlas-backups`; when the fallback API key is used, the API-key put/list/delete policy test also succeeds only for `myatlas-backups`; an anonymous `curl` to an object URL returns `403` or `404`; the lifecycle policy lists both rules; if the fallback API key is used, `sudo -u deploy oci os ns get --config-file /etc/myatlas/oci/config` succeeds.
@@ -1002,7 +1002,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
   - **Verification behavior:** List and get the latest object using `--auth "${OCI_CLI_AUTH:-instance_principal}"` (or no `--auth` when `OCI_CLI_CONFIG_FILE` is set), check it is non-empty, and check the first bytes contain `age-encryption.org/v1`.
   - **Acceptance:** `bash -n` passes for all three scripts; `shellcheck` reports no errors (run it on the VM where M2.1 installs it, or on the workstation if the VM copy is unavailable); a `--dry-run` mode lists the four databases and output object names without writing.
 - **M6.4 — Generate the age key pair and place only the public key on the VM.**
-  - **Deliverable:** An offline private key stored in the owner's password manager or encrypted removable media; the public key at `/etc/myatlas/age.pub` mode 644; `/etc/myatlas/backup.env` mode 600 containing `AGE_PUBLIC_KEY`, `BACKUP_BUCKET=myatlas-backups`, `OCI_CLI_AUTH=instance_principal`, `OCI_CLI_REGION=uk-lon-1`, and `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>`. When the API-key fallback is used, set `OCI_CLI_AUTH=api_key` and include `OCI_CLI_CONFIG_FILE=/etc/myatlas/oci/config`.
+  - **Deliverable:** An offline private key stored in the owner's password manager or encrypted removable media; the public key at `/etc/myatlas/age.pub` mode 644; `/etc/myatlas/backup.env` mode 600 containing `AGE_PUBLIC_KEY`, `BACKUP_BUCKET=myatlas-backups`, `OCI_CLI_AUTH=instance_principal`, `OCI_CLI_REGION=uk-london-1`, and `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>`. When the API-key fallback is used, set `OCI_CLI_AUTH=api_key` and include `OCI_CLI_CONFIG_FILE=/etc/myatlas/oci/config`.
   - **Commands (offline):**
     ```sh
     age-keygen -o age.key
@@ -1017,7 +1017,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     AGE_PUBLIC_KEY=<AGE_PUBLIC_KEY>
     BACKUP_BUCKET=myatlas-backups
     OCI_CLI_AUTH=instance_principal
-    OCI_CLI_REGION=uk-lon-1
+    OCI_CLI_REGION=uk-london-1
     OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>
     # Fallback API-key auth: set OCI_CLI_AUTH=api_key and uncomment the config path.
     # OCI_CLI_AUTH=api_key
@@ -1081,7 +1081,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     env \
       BACKUP_BUCKET=myatlas-backups \
       OCI_CLI_AUTH="${OCI_CLI_AUTH:-instance_principal}" \
-      OCI_CLI_REGION=uk-lon-1 \
+      OCI_CLI_REGION=uk-london-1 \
       OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE> \
       ./scripts/backup/verify-backup.sh
     oci os object list --auth "${OCI_CLI_AUTH:-instance_principal}" --bucket-name myatlas-backups
@@ -1211,11 +1211,11 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
       | jq -r '.data."approximate-size"'
     ```
   - **Bucket usage evidence note:** Without `--fields`, `oci os bucket get` returns a null approximate size. Parse `.data."approximate-size"` (bytes; and optionally `.data."approximate-count"`) and record the exact command and output in the verification note. The 20 GiB cap is enforced in bytes, so compare the parsed value against `20 * 1024^3` (21,474,836,480 bytes), not against raw `20`.
-  - **Expected:** One A1 instance at 2 OCPU / 12 GB; block volumes total 200 GB; no orphaned boot volume; one reserved public IP; bucket usage below 20 GiB, evidenced by the parsed `approximate-size` in bytes satisfying `< 20 * 1024^3` (and, if converted for display, `< 20` GiB). The script exits non-zero if a cap is exceeded or an orphan is detected.
+  - **Expected:** One A1 instance at 1 OCPU / 6 GB; boot plus block volumes at or below 200 GB (expected 196.6 GB); no orphaned boot volume; one reserved public IP; bucket usage below 20 GiB, evidenced by the parsed `approximate-size` in bytes satisfying `< 20 * 1024^3` (and, if converted for display, `< 20` GiB). The script exits non-zero if a cap is exceeded or an orphan is detected.
   - **Acceptance:** The script passes from OCI Cloud Shell or the workstation OCI CLI profile, and the verification note records the exact `oci os bucket get --fields approximateSize,approximateCount` command and its parsed `.data."approximate-size"` output, linked to the Limits page baseline from M0.2.
 - **M8.2 — Document capacity and idle-reclamation monitoring.**
   - **Deliverable:** "UK South capacity failure" and "Idle-instance reclamation recovery" sections in the runbook, plus a monitoring entry in the verification note.
-  - **Content:** Retry provisioning across the three ADs; expect multi-day capacity failures; never upgrade to paid. Monitor Compute → Instances → Metrics for CPU/network/memory; note OCI may reclaim idle Always Free instances based on 7-day low activity. Recovery: create a new instance from the preserved boot volume, reattach `myatlas-data`, reassociate the reserved IP, update GoDaddy DNS if the IP changed, and rerun the smoke test.
+  - **Content:** Probe A1 1 OCPU / 6 GB across the three ADs; if all three fail, stop and choose between waiting/retrying and a deliberately reduced Stage 2 Lite; never upgrade to paid and do not use `VM.Standard.E2.1.Micro` for the full stack. Expect multi-day capacity failures. Monitor Compute → Instances → Metrics for CPU/network/memory; note OCI may reclaim idle Always Free instances based on 7-day low activity. Recovery: create a new instance from the preserved boot volume, reattach `myatlas-data`, reassociate the reserved IP, update GoDaddy DNS if the IP changed, and rerun the smoke test.
   - **Acceptance:** Both sections exist with exact commands and expected output.
 - **M8.3 — Verify reserved public IP billing after the first day.**
   - **Deliverable:** A "Reserved IP billing" entry in the verification note recorded at least 24 hours after provisioning.
@@ -1337,7 +1337,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
 
 | Risk or open item | Impact | Mitigation / resolution point |
 | --- | --- | --- |
-| UK South A1 capacity is contended. | Provisioning may fail for days. | Retry across the three ADs; record failures; never upgrade to paid. Keep trying until an AD succeeds. |
+| UK South A1 capacity is contended. | Provisioning may fail for days. | Probe 1 OCPU / 6 GB across the three ADs; if all three fail, stop and choose between waiting/retrying and a deliberately reduced Stage 2 Lite; never upgrade to paid and do not use `VM.Standard.E2.1.Micro` for the full stack. Record failures. |
 | OCI may reclaim idle Always Free instances based on 7-day low CPU/network/memory. | The deployment can disappear without an explicit deletion. | Monitor Compute metrics; keep the optional uptime monitor; document recovery from the preserved boot volume in M8.2. |
 | Reserved public IP billing is ambiguous. | A small unexpected charge may appear. | Verify after 24 hours (M8.3); fall back to an ephemeral IP and update GoDaddy DNS if charged. |
 | Terminating an instance preserves the boot volume by default. | Orphaned boot volumes and unattached reserved IPs count against quotas. | Inventory and cleanup discipline in M1.6 and M8.1. |
@@ -1348,8 +1348,8 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
 | Single host is a single point of failure. | Any VM or host failure takes the whole app offline. | Document the limitation in ADR-0005; rely on backups and the recovery runbook; do not claim high availability. |
 | Secrets on disk in `.env.production`. | A host compromise exposes database and email credentials. | Mode 600, `deploy` ownership, no Git tracking, no logging; rotate on suspicion; evaluate OCI Vault in M9.3. |
 | The untracked, ignored `.env.development` contains local-only credentials. | Reusing those values in production would weaken security. | Never copy local credentials into production; generate new random values; rotate any value that may have been reused outside local development. |
-| Memory pressure from four JVMs plus Postgres on 12 GB. | OOM kills or slow responses. | Enforce `mem_limit` and `-Xmx`; Hikari 5; Postgres 40 connections; monitor `docker stats`; keep ~3 GiB headroom; 2 GB swap as a safety net. |
-| Docker image builds on the VM consume CPU/RAM. | Builds may be slow or contend with running services. | Build before the first `up`; build sequentially; use the 12 GB host; avoid rebuilding during traffic. |
+| Memory pressure from four JVMs plus Postgres on 6 GB. | OOM kills or slow responses. | Enforce `mem_limit` and `-Xmx`; Hikari 5; Postgres 40 connections; monitor `docker stats`; keep ~1 GiB headroom; 2 GB swap as a safety net. |
+| Docker image builds on the VM consume CPU/RAM. | Builds may be slow or contend with running services. | Build before the first `up`; build sequentially; on the 1 OCPU / 6 GB host expect slow builds; use the workstation ARM64 buildx and `docker save`/`scp`/`docker load` fallback if needed; avoid rebuilding during traffic. |
 | Object Storage request quota is shared. | Backups and future media calls can consume the 50,000/month allowance. | Stage 2 only writes backups; monitor bucket usage; Stage 5 adds the request ledger. |
 | Let's Encrypt rate limits. | Repeated failed issuance can block certificates for a week. | Use staging for probes; issue production certificates once DNS and ports are proven. |
 | Resend free-tier limits (100/day, 3,000/month). | Verification email bursts may be throttled. | Stage 2 sends only a test; Stage 3 must rate-limit and handle provider errors. |
@@ -1357,7 +1357,7 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
 | Identity Domains may require a domain-qualified dynamic-group principal. | The backup policy may not match and instance-principal uploads fail. | M6.1 verifies `oci iam dynamic-group get` and runs a policy test; use `dynamic-group <DOMAIN_NAME>/myatlas-instance` if required; record the form in ADR-0007. |
 | `deploy` is in the `docker` group, which is root-equivalent. | Compromise of the `deploy` SSH key is equivalent to root on the VM. | Protect the key, keep password auth disabled, document the consequence in ADR-0005 and the runbook, and keep the private key offline when not in use. |
 | SSH or UFW changes can lock the owner out. | The owner loses remote access during hardening. | Keep the original session and OCI Cloud Shell open; verify from a second terminal; confirm `<OWNER_IP>` before enabling UFW; use the Console/Cloud Shell recovery runbook. |
-| The block volume may not mount at boot while `/etc/fstab` uses `nofail`. | Docker could write data or logs to the 50 GB boot volume. | M2.4 adds `RequiresMountsFor=/srv/myatlas`; M8.6 verifies `findmnt /srv/myatlas` after boot; remove `nofail` after verification if preferred. |
+| The block volume may not mount at boot while `/etc/fstab` uses `nofail`. | Docker could write data or logs to the boot volume. | M2.4 adds `RequiresMountsFor=/srv/myatlas`; M8.6 verifies `findmnt /srv/myatlas` after boot; remove `nofail` after verification if preferred. |
 | Caddy or PostGIS tags can move or lose their ARM64 manifest. | An unexpected image change can break the deployment. | Pin `caddy:2.10.2-alpine` and `postgis/postgis:18-3.6` digests in `production.yml`; record `docker buildx imagetools inspect` output in ADR-0005. |
 | The 10 MB request-body limit is too small for Stage 5 media uploads. | Media uploads will fail when Stage 5 begins. | Stage 2 keeps the limit for JSON APIs; Stage 5 must raise or stream uploads as part of the media milestone. |
 | Owner-provided values are missing. | Commands cannot run. | Use the placeholders in this plan; fill them in M0/M1 before provisioning. Do not commit them. |
@@ -1389,8 +1389,8 @@ These notes are for someone who knows the repository but is learning OCI. They a
 
 | Area | Where to look | What "good" looks like |
 | --- | --- | --- |
-| Tenancy and quotas | Governance & Administration → Tenancy Management → Limits, Quotas and Usage | A1 2 OCPU / 12 GB; block storage 200 GB; Object Storage 20 GB and 50,000 requests/month; outbound 10 TB/month. Use Billing & Cost Management and Limits/Usage as the authoritative checks; Cost Analysis availability may vary. |
-| Compute | Compute → Instances → `myatlas-prod-01` | `RUNNING`; shape `VM.Standard.A1.Flex`; 2 OCPU / 12 GB; boot volume 50 GB; block volume attached. |
+| Tenancy and quotas | Governance & Administration → Tenancy Management → Limits, Quotas and Usage | A1 1 OCPU / 6 GB in use; verify the A1 allowance on the Limits page; block storage 200 GB cap (expected 196.6 GB used); Object Storage 20 GB and 50,000 requests/month; outbound 10 TB/month. Use Billing & Cost Management and Limits/Usage as the authoritative checks; Cost Analysis availability may vary. |
+| Compute | Compute → Instances → `myatlas-prod-01` | `RUNNING`; shape `VM.Standard.A1.Flex`; 1 OCPU / 6 GB; boot volume about 46.6 GB; block volume attached. |
 | Block volume | Storage → Block Volumes → `myatlas-data` | 150 GB; attached to `myatlas-prod-01`; same AD as the instance. |
 | Networking | Networking → Virtual Cloud Networks → `myatlas-vcn` | Public subnet; route `0.0.0.0/0` to `myatlas-igw`; security list has only 22 (owner IP), 80, 443. |
 | Reserved IP | Networking → Reserved Public IPs | `myatlas-public-ip` is `AVAILABLE` and attached to the instance's private IP. |
@@ -1438,9 +1438,9 @@ These notes are for someone who knows the repository but is learning OCI. They a
 - **objective:** Produce an executable Stage 2 deployment plan that a human owner can follow to deploy the existing walking-skeleton stack to OCI Always Free at `https://myatlas.services`, with HTTPS, private service networking, encrypted backups, cost guardrails, and runbooks.
 - **success_criteria:** The plan file exists at `docs/planning/stage-2-deployment-plan.md`; it reflects every approved decision; it contains M0–M9 with deliverables and acceptance checks; it maps every Stage 2 exit check, including the media deferral; it contains exact file paths and commands where useful; it contains no secrets and no unresolved decision placeholders. Runtime values use explicit `<...>` placeholders that the execution tasks resolve.
 - **non_goals:** Implementing Stage 3 features; implementing Stage 5 media uploads/processing/ledger; executing Terraform or CI registry publishing in Stage 2; provisioning any paid OCI resource; changing application code beyond deployment configuration.
-- **assumptions:** The tenancy is Always Free in UK South with three ADs; GoDaddy remains the DNS provider; the owner can run OCI CLI/Cloud Shell commands; the Stage 1 stack builds and exposes the documented ping/health endpoints; ARM64 images are available or can be built on the VM.
-- **open_questions:** None blocking. Execution-time unknowns: reserved public IP billing (verified in M8.3 with an ephemeral-IP fallback); the exact Resend DKIM/SPF record names and values (taken from the Resend dashboard in M5.1); the Ubuntu 24.04 ARM64 image OCID and the AD that accepts the A1 shape (M1.3); whether the pinned PostGIS image has an ARM64 manifest and the exact Caddy/PostGIS digests (M4.1 and M4.4, recorded in ADR-0005 with a fallback); and whether the tenancy requires the Identity Domains domain-qualified `dynamic-group <DOMAIN_NAME>/myatlas-instance` principal (M6.1, recorded in ADR-0007).
-- **accepted_tradeoffs:** One VM is a single point of failure; there is no high availability. The first deploy builds images on the VM instead of using a registry. Secrets live in a mode-600 file on the VM rather than OCI Vault. `deploy` in the `docker` group is root-equivalent, so the SSH key is highly privileged. Media is deferred to Stage 5, so one Stage 2 exit check is explicitly deferred.
+- **assumptions:** The tenancy is Always Free in UK South with three ADs; GoDaddy remains the DNS provider; the owner can run OCI CLI/Cloud Shell commands; the Stage 1 stack builds and exposes the documented ping/health endpoints; ARM64 images are available or can be built on the VM, with slower builds on the 1 OCPU host and a workstation buildx fallback if needed.
+- **open_questions:** None blocking. Execution-time unknowns: reserved public IP billing (verified in M8.3 with an ephemeral-IP fallback); the exact Resend DKIM/SPF record names and values (taken from the Resend dashboard in M5.1); the Ubuntu 24.04 ARM64 image OCID and the AD and A1 size that accept capacity (M1.3; 1 OCPU / 6 GB is the primary probe, with 2 OCPU / 12 GB if it later becomes available); whether the pinned PostGIS image has an ARM64 manifest and the exact Caddy/PostGIS digests (M4.1 and M4.4, recorded in ADR-0005 with a fallback); and whether the tenancy requires the Identity Domains domain-qualified `dynamic-group <DOMAIN_NAME>/myatlas-instance` principal (M6.1, recorded in ADR-0007).
+- **accepted_tradeoffs:** One VM is a single point of failure; there is no high availability. The 1 OCPU / 6 GB shape leaves limited memory headroom, and builds are slower on it. The first deploy builds images on the VM instead of using a registry. Secrets live in a mode-600 file on the VM rather than OCI Vault. `deploy` in the `docker` group is root-equivalent, so the SSH key is highly privileged. Media is deferred to Stage 5, so one Stage 2 exit check is explicitly deferred.
 - **validation:** M8.8 runs `smoke-test.sh`, `check-public-ports.sh`, `check-limits.sh`, `verify-backup.sh`, and the restore rehearsal after M8.7 confirms the runbook, and records the output in `docs/operations/stage-2-verification.md`; the M8.4 note is updated with the M8.8 results after that run.
 - **ask_abort_triggers:** Stop and ask before creating a resource that is not confirmed Always Free; before upgrading a shape or service; before exposing a port other than 22/80/443; before committing a secret; before deleting a boot volume, block volume, bucket, or reserved IP that may contain data or be in use; before changing DNS in a way that could break the apex; and if a command's output contradicts the quota baseline.
 
