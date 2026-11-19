@@ -1,3 +1,8 @@
+# NOTE (Stage 2 split, ADR-0005): This file is a legacy/single-host reference.
+# Current deployment uses split Compose files:
+#   - infra/compose/production-instance1.yml (caddy, web, account, postgres)
+#   - infra/compose/production-instance2.yml (atlas, media, social)
+# Update those files per docs/planning/stage-2-deployment-plan.md (M4).
 services:
   postgres:
     image: postgis/postgis:18-3.6

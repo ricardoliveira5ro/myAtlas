@@ -1,8 +1,9 @@
 # Stage 2 — Prove a safe zero-cost deployment (detailed plan)
 
-**Status:** Ready for human-guided execution
-**Source:** [`ROADMAP.md`](../ROADMAP.md) §7 (Stage 2), §15–16; [`TECHNICAL_DESIGN.md`](../TECHNICAL_DESIGN.md) §§2–3, 9.1, 12, 15–17; [`stage-1-foundation-plan.md`](stage-1-foundation-plan.md)
-**Product concept:** [`IDEA.md`](../IDEA.md)
+**Status:** Ready for human-guided execution  
+**Updated:** 2026-05-19 (two-instance E2.1.Micro split; A1 unavailable)  
+**Source:** [`ROADMAP.md`](../ROADMAP.md) §7 (Stage 2), §15–16; [`TECHNICAL_DESIGN.md`](../TECHNICAL_DESIGN.md) §§2–3, 9.1, 12, 15–17; [`stage-1-foundation-plan.md`](stage-1-foundation-plan.md)  
+**Product concept:** [`IDEA.md`](../IDEA.md)  
 **Scope note:** This plan intentionally does not predict dates. Work advances when each task's acceptance check passes. The human owner runs the commands; an agent guides, reviews evidence, and records results.
 
 ---
@@ -30,17 +31,47 @@ The plan is written for the human owner to execute task by task, top to bottom, 
 - The owner has an OCI account, SSH key pair, and access to the OCI Console and OCI Cloud Shell or a local OCI CLI.
 - The owner can receive email at `<OWNER_EMAIL>` for Resend testing and operational notices.
 - The Stage 1 stack still builds and the four services expose `/api/v1/<service>/ping` and internal Actuator health endpoints.
-- Docker images for the four services, web, Caddy, and PostGIS are available for `linux/arm64`; the plan includes a preflight check for the PostGIS image.
+- Docker images for the four services, web, Caddy, and PostGIS are built for `linux/amd64` on the owner workstation (or CI later) and transferred to hosts; do **not** build JVM images on the 1 GB instances.
 - No paid OCI resource is provisioned at any point. If a resource cannot be confirmed as Always Free, stop and resolve it before proceeding.
 
 ### Requirements
 
 - Deploy only within OCI Always Free allocations in the home region; never upgrade to a paid shape or managed service.
-- Expose only Caddy on TCP 80/443. PostgreSQL and the four Spring services remain private to the Compose network.
+- Expose only Caddy on instance 1 (TCP 80/443). PostgreSQL and the four Spring services are never publicly exposed; cross-host access is limited by security rules to required private paths.
 - Serve the apex `myatlas.services` as canonical; redirect `www.myatlas.services` to the apex with HTTP `301`.
 - Prove HTTPS, routing, health, request IDs, backups, restore, reboot recovery, and cost/capacity guardrails.
 - Keep secrets out of Git and out of logs; use parameterized placeholders in committed files.
 - Record the media deferral explicitly: uploads, processing, and the request-budget ledger are Stage 5 work.
+
+---
+
+## 2. Decisions locked
+
+| Topic | Locked decision | Consequence for this plan |
+| --- | --- | --- |
+| Stage 2 outcome | Real deployment of the existing walking-skeleton stack to OCI Always Free at `https://myatlas.services`. | The plan ends at a live, verified deployment, not at a feature-complete product. |
+| Execution model | Human owner runs the steps with agent guidance. Approach A: guided manual deployment first; Terraform codification is a follow-up and **not** part of Stage 2 execution. | Milestones use console/CLI instructions and acceptance evidence. M9 is outside Stage 2 acceptance. |
+| Domain and DNS | `myatlas.services` bought at GoDaddy. Keep GoDaddy DNS. No Cloudflare proxy. | All DNS changes happen in GoDaddy; Caddy terminates TLS directly. |
+| Hostname | Apex `myatlas.services` is canonical. `www.myatlas.services` redirects to the apex with HTTP `301`. | Caddy serves both names and returns `301` for `www`; canonical links use the apex. |
+| Tenancy | OCI Always Free-only, home region UK South (London), three availability domains. No paid upgrade. | Provision only after verifying limits; retry across ADs on capacity failure where applicable. |
+| Compute | **Two** `VM.Standard.E2.1.Micro` (AMD, 1 OCPU / 1 GB RAM each), Ubuntu 24.04. **Instance 1 (`myatlas-prod-01`)**: public entrypoint, reserved public IP `myatlas-public-ip` (`<RESERVED_PUBLIC_IP>`), attaches the single **50 GB** block volume `myatlas-data-01` mounted at `/srv/myatlas` (Postgres data + backup staging). **Instance 2 (`myatlas-prod-02`)**: backend/data workers host, no reserved public IP by default, uses boot volume only (47 GB). | Two hosts, split stack, no HA. Tight memory on both (swap optional, use carefully). Do not keep a stopped E2.Micro as a “spare” (wastes boot-volume quota). |
+| Network | One VCN, one public subnet, one internet gateway, one route table, one security list (adjusted for two hosts). Inbound TCP 22 from owner IP only. Inbound TCP 80/443 to instance 1 only. Postgres 5432 allowed only from instance 2’s private IP to instance 1. App ports 8082–8084 allowed only from instance 1’s private IP to instance 2. No public access to 3000, 5432, 8081–8084. | Only Caddy on instance 1 is public; cross-host rules are explicit and minimal. |
+| Stack (split) | Docker Engine + Compose on both VMs. **Instance 1:** Caddy, web, account, PostGIS. **Instance 2:** atlas, media, social. Caddy on instance 1 reverse-proxies `/api/v1/atlas/*` → `http://<INSTANCE2_PRIVATE_IP>:8082`, `/api/v1/media/*` → `8083`, `/api/v1/social/*` → `8084`; `/api/v1/identity/*` → `account:8081` on the same host; `/` → `web:3000`. | Two Compose projects (or one repo deployed twice with different service subsets) must stay consistent. Internal service URLs in env use private IPs for cross-host calls. |
+| Images | Build **amd64** images on the owner workstation (or CI later), transfer with `docker save` / `scp` / `docker load` to the host(s) that need them. Do not build JVM images on 1 GB hosts. | Avoid OOM and slow builds on Micro instances. |
+| Caddy routing | Same logical routes as before, with atlas/media/social upstreams pointing to instance 2 private IPs. Unknown `/api/v1/*` → JSON 404; `/actuator/*` blocked publicly. | Document upstream IPs in runbook and in Compose/Caddy env/config. |
+| Email | Resend Free (3,000/month, 100/day), GoDaddy DNS, sender `no-reply@myatlas.services`. OCI Email Delivery excluded (Always Free 0/day). | Stage 2 verifies Resend delivery from instance 1 (or a host that can reach internet); app adapter integration is Stage 3 work documented now. |
+| Media | Deferred to Stage 5. Stage 2 does not implement uploads/processing/ledger/guard beyond running Media as a healthy skeleton if included in instance 2 stack? **Decision:** include `media` container on instance 2 in the split for parity/health verification only, with no public upload flow required; Object Storage private bucket for backups only on instance 1. Full media features in Stage 5. | Media remains skeleton-level in Stage 2 except being deployed/healthy as part of the split. |
+| Backups | Nightly `pg_dump` per DB from instance 1, encrypted with `age` (public key on VM, private key offline), uploaded to private `myatlas-backups` in `uk-london-1`. Prefer instance principal on instance 1; fallback is a dedicated least-privilege user key stored only on instance 1. Retention 7 daily + up to 4 weekly (28 days). Monthly restore rehearsal into a clean local Postgres/PostGIS container. | Backup scripts run on instance 1 only. |
+| Resource ceilings (guidance) | Per host 1 GB RAM: set strict `mem_limit` per container, small JVM `-Xmx` (e.g. 160–256 MB where applicable), Postgres tuned down on instance 1, use swap cautiously (2 GB) if needed. Exact values recorded in Compose and runbook. | Expect tight headroom; monitor with `docker stats`. |
+| Observability | JSON logs to stdout, Docker `json-file` rotation, Caddy access logs, request IDs, internal-only health endpoints, documented commands. Optional free external uptime monitor pointing at `https://myatlas.services/`. | Same as before, applied per host. |
+| Validation/acceptance | Same functional checks as before, executed against the public URL (instance 1) with instance 2 reachable privately. | Evidence recorded in `docs/operations/stage-2-verification.md`. |
+| Runbooks | Extend runbook for two hosts: which host runs what, SSH to each, deploy/update per host, cross-host networking checks, backup only on instance 1. | `docs/operations/runbook.md` updated. |
+| Secrets | No secrets in Git. Per-host env files under deployed Compose dirs, mode `600`. | Examples committed; real env files ignored. |
+| Terraform | Not part of Stage 2 execution. | M9 follow-up. |
+
+## 3. Sequencing approach (updated)
+
+Same Approach A (manual first), but milestones now include **two hosts** and a **split Compose deployment**. M5/M6/M7 can partially overlap after the base stack is up on both hosts (M6 backups remain on instance 1).
 
 ---
 
@@ -280,8 +311,8 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     ```
     Omit `--boot-volume-size-in-gbs` to use the image-default boot volume (about 46.6 GB); a larger boot volume would also fit the 200 GB cap but is not required.
   - **Expected:** The instance reaches `RUNNING`; `ssh -i <SSH_PRIVATE_KEY_PATH> ubuntu@<EPHEMERAL_PUBLIC_IP>` works; `uname -m` returns `aarch64`; `nproc` returns `1`; `free -g` shows about 6 GB; `lsblk` shows a boot disk of about 46.6 GB.
-  - **Capacity failure:** The owner has already confirmed that the 2 OCPU / 12 GB shape is unavailable in all three UK South ADs. Probe 1 OCPU / 6 GB in the next AD. If 1 OCPU / 6 GB also fails in all three ADs, stop and choose between waiting/retrying A1 and a deliberately reduced Stage 2 Lite; do not use `VM.Standard.E2.1.Micro` for the full stack. Provisioning may fail for days; do not upgrade to a paid shape. Record each failed attempt, shape, and AD in the verification note.
-  - **Acceptance:** The instance is running on ARM64 with the requested 1 OCPU / 6 GB shape, and the AD used is recorded.
+  - **Capacity failure (historical A1 notes):** If any A1 capacity retry is attempted, probe other ADs and do not upgrade to paid shapes. The current Stage 2 topology uses two `VM.Standard.E2.1.Micro` instances (AMD64) as described in Decisions and M1.3/M1.5 below; do not revert to a single A1 host unless this plan is explicitly superseded by a new ADR/plan update.
+  - **Acceptance:** Both instances are running on AMD64 (x86_64) with 1 OCPU / 1 GB each, and ADs used are recorded.
 - **M1.4 — Move the reserved public IP onto the instance.**
   - **Deliverable:** The reserved public IP is attached to the instance's primary VNIC; the temporary ephemeral public IP is released.
   - **Commands:**
@@ -342,188 +373,57 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     oci bv volume list --compartment-id <COMPARTMENT_OCID>
     oci network public-ip list --compartment-id <COMPARTMENT_OCID> --scope REGION
     ```
-  - **Acceptance:** The note states that terminating an instance preserves its boot volume by default, and that preserved boot volumes and unattached reserved public IPs still count against Always Free quotas. No orphaned boot volume or unattached reserved IP remains after M1.
+  - **Acceptance:** The note states that terminating an instance preserves its boot volume by default, and that preserved boot volumes and unattached reserved public IPs still count against Always Free quotas. No orphaned boot volume, stopgap E2.1.Micro instance, or unattached reserved IP remains after M1.
 
-### M2 — Host bootstrap, storage, and SSH/firewall hardening
+### M2 — Host bootstrap, storage, and SSH/firewall hardening (both hosts unless noted)
 
-- **M2.1 — Write and run the host bootstrap script.**
-  - **Deliverable:** `scripts/deploy/bootstrap-host.sh` is idempotent and performs: `apt-get update`/`upgrade`, installs `ca-certificates`, `curl`, `gnupg`, `git`, `jq`, `age`, `ufw`, `shellcheck`, `python3-pip`, `pipx`, and Docker Engine, the Compose plugin, and the buildx plugin from Docker's Ubuntu ARM64 repository; enables Docker; installs the OCI CLI system-wide with `pipx install --global oci-cli` (fallback: `sudo python3 -m pip install --break-system-packages oci-cli` if the packaged pipx lacks `--global`); creates `/srv/myatlas/{app,docker,backups}`.
-  - **Safety check:** The script refuses to run unless `/srv/myatlas` is a mount point (`findmnt --mountpoint /srv/myatlas`). This prevents Docker data from being written to the boot volume before the 150 GB block volume is mounted.
-  - **Commands:**
-    ```sh
-    findmnt --mountpoint /srv/myatlas
-    chmod +x scripts/deploy/bootstrap-host.sh
-    sudo ./scripts/deploy/bootstrap-host.sh
-    sudo ./scripts/deploy/bootstrap-host.sh
-    ```
-  - **Expected:** The second run completes without error (idempotent). `docker --version`, `docker compose version`, `age --version`, `oci --version`, and `shellcheck --version` succeed for the `deploy` user after M2.2.
-  - **Acceptance:** The script runs twice cleanly and all five tools report versions.
-- **M2.2 — Create the deploy user and harden SSH without losing the current session.**
-  - **Deliverable:** A non-root `deploy` user in the `sudo` group and the `docker` group, the owner's public key in `~deploy/.ssh/authorized_keys`, and `/etc/ssh/sshd_config.d/99-myatlas.conf` containing:
-    ```text
-    PasswordAuthentication no
-    KbdInteractiveAuthentication no
-    PermitRootLogin no
-    PubkeyAuthentication yes
-    AllowUsers deploy ubuntu
-    ```
-    The temporary `ubuntu` entry keeps the existing session usable during verification; replace it with `AllowUsers deploy` only after the `deploy` login is proven from a second terminal.
-  - **Commands:**
-    - On the owner workstation, copy the public key to the VM. `<SSH_PUBLIC_KEY_PATH>` is a workstation path and is not readable on the VM, so the source is copied to `/tmp` first:
-      ```sh
-      scp -i <SSH_PRIVATE_KEY_PATH> ~/.ssh/<key>.pub ubuntu@<RESERVED_PUBLIC_IP>:/tmp/<key>.pub
-      ```
-      Alternatively, if the public key is already on the VM, use `/home/ubuntu/.ssh/authorized_keys` as the source.
-    - On the VM:
-      ```sh
-      id deploy >/dev/null 2>&1 || sudo useradd --create-home --shell /bin/bash --groups sudo deploy
-      sudo usermod -aG sudo deploy
-      sudo usermod -aG docker deploy
-      sudo chown -R deploy:deploy /srv/myatlas
-      sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
-      sudo install -m 600 -o deploy -g deploy /tmp/<key>.pub /home/deploy/.ssh/authorized_keys
-      sudo tee /etc/ssh/sshd_config.d/99-myatlas.conf >/dev/null <<'EOF'
-      PasswordAuthentication no
-      KbdInteractiveAuthentication no
-      PermitRootLogin no
-      PubkeyAuthentication yes
-      AllowUsers deploy ubuntu
-      EOF
-      sudo sshd -t && sudo systemctl restart ssh
-      ```
-  - **Lockout safety:** Keep the original `ubuntu` SSH session open for the whole procedure. `sudo sshd -t && sudo systemctl restart ssh` restarts SSH only when the configuration test succeeds. From a second terminal, run `ssh -i <SSH_PRIVATE_KEY_PATH> deploy@<RESERVED_PUBLIC_IP>`. Only after that login, `sudo -l -U deploy`, and `sudo -iu deploy docker ps` all succeed, replace `AllowUsers deploy ubuntu` with `AllowUsers deploy`, rerun `sudo sshd -t && sudo systemctl restart ssh`, verify the `deploy` login again, and close the original `ubuntu` session.
-  - **Expected:** The second-terminal `ssh -i <SSH_PRIVATE_KEY_PATH> deploy@<RESERVED_PUBLIC_IP>` works while the original session is open. `sudo -l -U deploy` shows the deploy user's sudo privileges (for example `(ALL : ALL) ALL`), and `id -nG deploy` includes `sudo` and `docker`. `ssh -o PreferredAuthentications=password root@<RESERVED_PUBLIC_IP>` is refused. `sudo sshd -T | grep -E 'passwordauthentication|permitrootlogin'` shows `no` for both. `sudo -iu deploy docker ps` works without `sudo docker`.
-  - **Acceptance:** Key-only login as `deploy` works from a second terminal; `sudo -l -U deploy` shows sudo access and `id -nG deploy` shows both `sudo` and `docker`; root and password login are refused after the temporary `ubuntu` entry is removed; `deploy` can run Docker and owns `/srv/myatlas`. The `docker` group is documented as root-equivalent and the `deploy` SSH key as highly privileged in ADR-0005 and the runbook.
-- **M2.3 — Enable the host firewall and Docker port guard without locking yourself out.**
-  - **Deliverable:** UFW default deny incoming, allow 22 from `<OWNER_IP>`, allow TCP 80/443 from anywhere (no UDP 443 rule), enabled. Persisted `DOCKER-USER` rules drop TCP 3000, 5432, 8080, and 8081–8084 even if a future Compose change accidentally publishes them.
-  - **Commands:**
-    ```sh
-    # On the owner workstation (not the VM and not OCI Cloud Shell):
-    curl -4 ifconfig.me
-    # Record the output as <OWNER_IP>. The VM and Cloud Shell report their own egress IPs, not the owner IP.
+Apply M2.1–M2.5 on **instance 1 (`myatlas-prod-01`)** and on **instance 2 (`myatlas-prod-02`)**, with these differences:
 
-    # On the VM:
-    sudo ufw default deny incoming
-    sudo ufw default allow outgoing
-    sudo ufw allow from <OWNER_IP> to any port 22 proto tcp
-    sudo ufw allow 80/tcp
-    sudo ufw allow 443/tcp
-    sudo ufw --force enable
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
-    sudo iptables -I DOCKER-USER -p tcp --dport 3000 -j DROP
-    sudo iptables -I DOCKER-USER -p tcp --dport 5432 -j DROP
-    sudo iptables -I DOCKER-USER -p tcp --dport 8080 -j DROP
-    sudo iptables -I DOCKER-USER -p tcp --dport 8081:8084 -j DROP
-    sudo netfilter-persistent save
-    sudo ufw status verbose
-    sudo iptables -S DOCKER-USER
-    ```
-  - **Lockout safety:** Keep the OCI Cloud Shell session open and the original SSH session open until the second-terminal SSH check succeeds. Discover `<OWNER_IP>` on the owner workstation (not on the VM and not in OCI Cloud Shell; those return the VM or Cloud Shell egress IP) and confirm it is the address you use for SSH before enabling UFW. After `ufw --force enable`, verify from a second terminal with `ssh -i <SSH_PRIVATE_KEY_PATH> deploy@<RESERVED_PUBLIC_IP>`. If SSH is blocked, use OCI Cloud Shell to update `myatlas-public-sl` so TCP 22 allows the workstation-discovered owner IP, then re-test. The OCI Console console-connection and exact OCI Cloud Shell recovery commands are documented in the runbook (M7.7, consolidated and verified in M8.7).
-  - **Expected:** The owner workstation's `curl -4 ifconfig.me` result was recorded as `<OWNER_IP>` and used in the UFW and OCI security-list rules before UFW was enabled. `ufw status verbose` shows default deny incoming, 22 from `<OWNER_IP>`, TCP 80/443 from anywhere, and no UDP 443 rule. `iptables -S DOCKER-USER` shows DROP rules for 3000, 5432, 8080, and 8081–8084. The second-terminal SSH check succeeds.
-  - **Acceptance:** The firewall mirrors the OCI security list. Docker's published ports cannot bypass the web/database/service port blocks. A second-terminal SSH login succeeds after the UFW and OCI security-list rules are updated to the workstation-discovered `<OWNER_IP>`, before the original session is closed. The runbook contains actionable OCI Console console-connection and OCI Cloud Shell recovery steps for an SSH/UFW lockout.
-- **M2.4 — Move Docker data and logs to the block volume and bind Docker to the mount.**
-  - **Deliverable:** `/etc/docker/daemon.json` with `"data-root": "/srv/myatlas/docker"`, `"log-driver": "json-file"`, and `"log-opts": {"max-size": "10m", "max-file": "3"}`; a systemd drop-in that requires `/srv/myatlas`; Docker restarted.
-  - **Commands:**
-    ```sh
-    sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-    {
-      "data-root": "/srv/myatlas/docker",
-      "log-driver": "json-file",
-      "log-opts": {
-        "max-size": "10m",
-        "max-file": "3"
-      }
-    }
-    EOF
-    sudo install -d /etc/systemd/system/docker.service.d
-    sudo tee /etc/systemd/system/docker.service.d/10-myatlas-mount.conf >/dev/null <<'EOF'
-    [Unit]
-    RequiresMountsFor=/srv/myatlas
-    After=srv-myatlas.mount
-    EOF
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
-    docker info --format '{{.DockerRootDir}}'
-    docker info --format '{{json .LoggingDriver}}'
-    systemctl show docker --property=RequiresMountsFor
-    systemctl show docker --property=After | tr ' ' '\n' | grep -x 'srv-myatlas.mount'
-    ```
-  - **Expected:** Docker root dir is `/srv/myatlas/docker`; logging driver is `json-file`; `RequiresMountsFor` shows `/srv/myatlas`; `After` includes `srv-myatlas.mount` (the systemd mount unit for `/srv/myatlas`).
-  - **Acceptance:** Docker data and container logs live on the block volume, not the boot volume. With `nofail` in `/etc/fstab`, the systemd drop-in prevents Docker from starting against an unmounted boot-volume path; alternatively, remove `nofail` after verifying the volume is always present at boot. M8.6 checks `findmnt /srv/myatlas` after the reboot.
-- **M2.5 — Set UTC time sync and a bounded swap file.**
-  - **Deliverable:** UTC timezone, `systemd-timesyncd` enabled, and a 2 GB swap file on the boot volume persisted in `/etc/fstab` with an idempotent `grep -q` guard.
-  - **Commands:**
-    ```sh
-    sudo timedatectl set-timezone UTC
-    sudo systemctl enable --now systemd-timesyncd
-    sudo fallocate -l 2G /swapfile
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
-    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-    timedatectl
-    swapon --show
-    ```
-  - **Expected:** `timedatectl` shows `System clock synchronized: yes` and `Time zone: UTC`; `swapon --show` lists `/swapfile` at 2G.
-  - **Acceptance:** Time is synchronized and swap is active. Re-running only the `grep -q ... || echo ...` fstab guard must not duplicate the `/etc/fstab` entry; the swap setup commands themselves (`fallocate`, `chmod`, `mkswap`, `swapon`) are not rerunnable and need not be. Swap is a safety net, not a replacement for the memory limits.
+- **M2.1 (instance 1 only):** the safety check requires `/srv/myatlas` to be a mount point before running bootstrap (the 50 GB block volume). On **instance 2**, do **not** mount a block volume; create directories on the boot volume instead:
+  ```sh
+  sudo mkdir -p /srv/myatlas/app /srv/myatlas/docker /srv/myatlas/backups
+  sudo chown -R deploy:deploy /srv/myatlas
+  ```
+  Then run `bootstrap-host.sh` logic equivalent for packages/Docker/OCI CLI as needed, but **skip** the `findmnt /srv/myatlas` mount requirement for instance 2 (or adjust the script per-host). Record the deviation in the verification note. Docker `data-root` on instance 2 may be set to `/srv/myatlas/docker` on the boot volume (ensure enough space) or left default; prefer `/srv/myatlas/docker` for consistency if space allows.
+- **M2.2:** Use the same SSH key and `deploy` user pattern on both hosts. For **instance 2**, prefer SSH **from instance 1** (`ProxyJump`) or OCI Console/Serial for bootstrap if you did not assign a public IP; document the chosen admin path. If instance 2 has no public IP, do not open TCP 22 publicly to it.
+- **M2.3:** On **instance 1**, allow TCP 22 from `<OWNER_IP>`, allow 80/443 from `0.0.0.0/0`, and apply `DOCKER-USER` drops for 3000,5432,8080,8081–8084 (as before). On **instance 2**, allow TCP 22 only from `<OWNER_IP>` **or** from instance 1 private IP `<INST1_PRIV>` (document which). Do **not** allow 80/443 publicly on instance 2. Apply the same `DOCKER-USER` drops on instance 2 for 3000,5432,8081–8084 (and 8080 if unused) to prevent accidental publishes.
+- **M2.4:** On **instance 1**, move Docker data to `/srv/myatlas/docker` (on the block volume) with the systemd drop-in requiring `/srv/myatlas`. On **instance 2**, either set `data-root` to `/srv/myatlas/docker` on the boot volume or to `/var/lib/docker`; prefer `/srv/myatlas/docker` only if you created that tree on the boot volume and have space — otherwise use default and note it. The runbook must state the chosen layout per host.
+- **M2.5:** Apply UTC, `systemd-timesyncd`, and a **2 GB swap** file on **both** hosts (boot volume). This is important on 1 GB RAM boxes.
 
-### M3 — DNS and TLS platform probe
+Acceptance: both hosts have Docker/Compose/age/jq/oci-cli/shellcheck as appropriate, `deploy` user hardened, firewalls match the matrix in M1.6, and swap + UTC configured on both.
+
+### M3 — DNS and TLS platform probe (instance 1)
 
 - **M3.1 — Create the GoDaddy DNS records.**
-  - **Deliverable:** Apex `A` record `@` → `<RESERVED_PUBLIC_IP>`, `www` `A` record → `<RESERVED_PUBLIC_IP>`, TTL 600 seconds (or the lowest available). Remove any conflicting GoDaddy parked-page A/CNAME records for `@` and `www` first.
+  - **Deliverable:** Apex `A` `@` → `<RESERVED_PUBLIC_IP>` (points to **instance 1**), `www` `A` → same IP, TTL 600. Remove conflicting parked records for `@` and `www`.
   - **Acceptance:**
     ```sh
     dig +short A myatlas.services @1.1.1.1
-    dig +short A myatlas.services @8.8.8.8
     dig +short A www.myatlas.services @1.1.1.1
-    dig +short A www.myatlas.services @8.8.8.8
     ```
-    Both public resolvers return `<RESERVED_PUBLIC_IP>` for both names.
-- **M3.2 — Probe TLS with a temporary Caddy container (staging only).**
-  - **Pinned image (decide here, before any probe):** Use the single exact tag `caddy:2.10.2-alpine` for the M3.2 probe, `infra/compose/production.yml` (M4.1), and the M4.2 validation. Record this exact tag in ADR-0005. Do not use `latest` or a floating `2.10-alpine` tag.
-  - **Deliverable:** A temporary probe directory `/srv/myatlas/probe` with a `Caddyfile` and `index.html`. The probe uses Let's Encrypt staging only to avoid rate limits; production issuance happens once in M4.
-  - **Probe `Caddyfile`:**
+    Both return `<RESERVED_PUBLIC_IP>`.
+- **M3.2 — Probe TLS with a temporary Caddy container on instance 1 (staging only).**
+  - **Pinned image:** `caddy:2.10.2-alpine` (same as M4). Record in ADR-0005.
+  - **Deliverable:** `/srv/myatlas/probe` on **instance 1** with staging `Caddyfile`. Do not issue production certs from repeated probes.
+  - **Probe `Caddyfile` (example):**
     ```caddyfile
     {
       email {$ACME_EMAIL}
       acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
     }
-
-    myatlas.services {
-      respond "myatlas stage 2 tls probe" 200
-    }
-
-    www.myatlas.services {
-      redir https://myatlas.services{uri} 301
-    }
+    myatlas.services { respond "myatlas stage 2 tls probe" 200 }
+    www.myatlas.services { redir https://myatlas.services{uri} 301 }
     ```
-  - **Run:**
+  - **Run on instance 1:**
     ```sh
-    sudo docker run -d --name caddy-probe \
-      -p 80:80 -p 443:443 \
-      -e ACME_EMAIL=<OWNER_EMAIL> \
-      -v /srv/myatlas/probe/Caddyfile:/etc/caddy/Caddyfile:ro \
-      -v caddy-probe-data:/data \
-      caddy:2.10.2-alpine
+    sudo mkdir -p /srv/myatlas/probe
+    # write Caddyfile, then:
+    sudo docker run -d --name caddy-probe -p 80:80 -p 443:443 -e ACME_EMAIL=<OWNER_EMAIL> -v /srv/myatlas/probe/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy-probe-data:/data caddy:2.10.2-alpine
     ```
-  - **Expected:**
-    ```sh
-    curl -kI https://myatlas.services
-    # HTTP/1.1 200 OK or HTTP/2 200. The -k flag is required because the staging certificate is untrusted.
-    curl -I http://myatlas.services
-    # HTTP/1.1 308 Permanent Redirect with Location: https://myatlas.services/
-    curl -kI https://www.myatlas.services
-    # HTTP/1.1 301 Moved Permanently with Location: https://myatlas.services/
-    openssl s_client -connect myatlas.services:443 -servername myatlas.services </dev/null 2>/dev/null | openssl x509 -noout -issuer -dates
-    # issuer=(STAGING) Pretend Pear X1 (or another Let's Encrypt staging issuer)
-    ```
-    HTTPS returns `200` only with `-k`; without `-k`, curl reports a certificate verification error because the Let's Encrypt staging certificate is untrusted by design. This is expected and is not a deployment failure; M4 issues the production certificate. HTTP returns `308` to HTTPS; `www` returns `301` to the apex because the probe Caddyfile uses an explicit `301`. `openssl s_client` shows a Let's Encrypt staging issuer, for example `(STAGING) Pretend Pear X1`.
-  - **After the probe:** Stop and remove the probe container. Do **not** request a production certificate from the probe; production issuance happens once in M4. Keep `caddy-probe-data` until M4 is healthy, then remove it.
-  - **Acceptance:** Both hostnames resolve, ports 80/443 reach the probe, `curl -kI` returns `200` for the apex and `301` for `www`, plain HTTP returns `308`, and `openssl` confirms the staging issuer. The probe uses the pinned `caddy:2.10.2-alpine` tag recorded in ADR-0005, and the evidence records that the staging certificate is untrusted by design and that `-k` was used for the HTTPS probes.
-- **M3.3 — Document DNS/TLS rollback and rate-limit handling.**
-  - **Deliverable:** A "TLS probe and rollback" subsection in `docs/operations/runbook.md`.
-  - **Content:** Remove or restore the GoDaddy A records; stop the probe/Caddy; wait for TTL; use Let's Encrypt staging for repeated probes; note Let's Encrypt rate limits and the need to avoid repeated production certificate issuance.
-  - **Acceptance:** The runbook states the exact rollback commands and the rate-limit rule. No production certificate is requested repeatedly during debugging.
+  - **Expected:** `curl -kI https://myatlas.services` returns 200 (staging); `curl -I http://myatlas.services` returns 308 to HTTPS; `www` returns 301 to apex; `openssl s_client ...` shows a Let's Encrypt staging issuer. HTTP 308 vs 301 in probes is acceptable if behavior is documented; final production Caddyfile should use explicit redirects as specified in M4.2.
+  - **After probe:** stop/remove probe container; keep `caddy-probe-data` until M4 healthy, then remove. No production cert issuance from probes.
+  - **Acceptance:** DNS and 80/443 reach instance 1; staging cert observed with `-k`; evidence recorded.
+- **M3.3 — Document DNS/TLS rollback and rate-limit handling.** Same as before, in runbook under “TLS probe and rollback”.
 
 ### M4 — Production Compose stack and first full deploy
 
@@ -759,8 +659,8 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
   - **Expected:** `compose ps` shows `caddy`, `web`, `account`, `atlas`, `media`, `social`, and `postgres` all `healthy` (or `running` for Caddy, whose healthcheck is process-level). Flyway applies `V1__baseline.sql` in each database.
   - **Acceptance:** All services are healthy; the web root and all four ping endpoints work through Caddy; each service database has its marker table and a successful Flyway history row.
 - **M4.6 — Verify the first deploy end to end.**
-  - **Deliverable:** Captured output in `docs/operations/stage-2-verification.md` for the first-deploy checks.
-  - **Commands:**
+  - **Deliverable:** Verification notes recorded (no new docs file required unless requested).
+  - **Commands (from workstation or instance 1):**
     ```sh
     curl -fsS -o /dev/null -w '%{http_code}\n' https://myatlas.services/
     curl -sS -o /dev/null -w '%{http_code}\n' http://myatlas.services/
@@ -771,48 +671,24 @@ Each task lists a **Deliverable** and an **Acceptance** check. Where useful, it 
     curl -i https://myatlas.services/api/v1/social/ping
     curl -i https://myatlas.services/api/v1/unknown
     curl -i https://myatlas.services/actuator/health
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T postgres \
-      psql -U postgres -d account_db -c \
-      'select installed_rank, version, description, success from flyway_schema_history;'
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T postgres \
-      psql -U postgres -d account_db -c 'select count(*) from account_service_marker;'
     ```
-  - **Expected:** Web root `200`; HTTP `308` from Caddy's automatic HTTP-to-HTTPS redirect; `www` `301` to `https://myatlas.services/` because the Caddyfile uses an explicit `301`; each ping `200` with an `X-Request-ID` response header; unknown API `404` with `Content-Type: application/problem+json` and `"code":"NOT_FOUND"`; Actuator `404`; Flyway row `success = t`; marker count `1`. Repeat the Flyway/marker check for `atlas_db`, `media_db`, and `social_db` using their marker table names.
-  - **TLS note:** If Caddy is still completing ACME when the first curl runs, wait for the certificate order to finish and rerun the HTTPS checks. Do not restart Caddy repeatedly; repeated production issuance can hit Let's Encrypt rate limits.
-  - **Acceptance:** Every expected result above is demonstrated and recorded.
-- **M4.7 — Verify resource limits and database connections.**
-  - **Deliverable:** A "Runtime limits" entry in the verification note showing container memory limits, JVM heaps, Hikari pool, and Postgres connections.
-  - **Commands:**
+  - On **instance 1** (Postgres host):
     ```sh
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production ps
-    docker stats --no-stream
-    free -h
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T account printenv JAVA_TOOL_OPTIONS
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T account sh -c 'java -XX:+PrintFlagsFinal -version 2>&1 | grep MaxHeapSize'
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T atlas sh -c 'java -XX:+PrintFlagsFinal -version 2>&1 | grep MaxHeapSize'
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T media sh -c 'java -XX:+PrintFlagsFinal -version 2>&1 | grep MaxHeapSize'
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T social sh -c 'java -XX:+PrintFlagsFinal -version 2>&1 | grep MaxHeapSize'
-    # Alternative if PrintFlagsFinal is unavailable:
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T account sh -c 'jcmd 1 VM.flags | tr " " "\n" | grep MaxHeapSize'
-    docker compose -f infra/compose/production.yml --env-file infra/compose/.env.production exec -T postgres \
-      psql -U postgres -d postgres -c 'show max_connections;'
+    docker compose -f infra/compose/production-instance1.yml --env-file .env.production exec -T postgres psql -U postgres -d account_db -c "select installed_rank,version,description,success from flyway_schema_history;"
     ```
-  - **Expected:** `free -h` records the host's total and available memory; `docker stats` shows each container under its `mem_limit`; account/atlas/media print `-Xmx320m`, social prints `-Xmx256m`; the effective `MaxHeapSize` is close to each configured `-Xmx` (record the exact effective bytes per service from this command output); `max_connections` is `40`.
-  - **Acceptance:** The limits match the decisions table, the effective `MaxHeapSize` values and the `free -h` host available memory are recorded in the verification note, and the host retains at least ~1 GiB headroom.
-- **M4.8 — Protect the production environment file.**
-  - **Deliverable:** `.env.production` is ignored by Git, mode 600, owned by `deploy`, and never copied into an image.
-  - **Commands:**
-    ```sh
-    git check-ignore -v infra/compose/.env.production
-    stat -c '%a %U:%G' infra/compose/.env.production
-    git status --short
-    ```
-  - **Expected:** `git check-ignore` reports the `.env.*` rule; `stat` shows `600 deploy:deploy`; `git status` does not list `.env.production`.
-  - **Acceptance:** No production secret is tracked or staged.
-- **M4.9 — Write the first-deploy, update, restart, and rollback runbook sections.**
-  - **Deliverable:** `docs/operations/runbook.md` sections "First deploy", "Update deploy", "Restart", and "Rollback image tag".
-  - **Content:** Exact commands for clone/build/up, `git pull` + rebuild + `up -d`, `docker compose restart <service>`, and rolling back by setting `IMAGE_TAG` to a previously built tag and running `up -d`.
-  - **Acceptance:** Each section contains commands and expected output; a reader can follow them without guessing.
+    Repeat for `atlas_db`, `media_db`, `social_db`.
+  - **Expected:** Web `200`, HTTP→HTTPS redirect `308`, `www` `301` to apex, each ping `200` with `X-Request-ID`, unknown API `404` JSON `NOT_FOUND`, Actuator `404`, Flyway success rows present.
+  - **Acceptance:** Results recorded; if ACME pending, wait and retry (no repeated prod issuance spam).
+- **M4.7 — Verify resource limits (per host).**
+  - **Deliverable:** Notes showing limits and heap/connection checks.
+  - **Instance 1:** `docker stats --no-stream`, `free -h`, check `JAVA_TOOL_OPTIONS`/MaxHeap for `account`, `web` container memory, Postgres `max_connections` (should be 40), Hikari pool 5.
+  - **Instance 2:** `docker stats --no-stream`, `free -h`, check `JAVA_TOOL_OPTIONS`/MaxHeap for `atlas`,`media`,`social`.
+  - **Acceptance:** Limits match decisions (web 512m, account 512m on inst1; atlas/media 512m, social 384m on inst2; postgres 1g on inst1). Host memory headroom noted; swap 2 GB present on both.
+- **M4.8 — Protect env files on both hosts.**
+  - **Deliverable:** `.env.production` ignored by git, mode 600, owned by `deploy`, not committed. Repeat checks on each host path.
+  - **Acceptance:** No secrets tracked.
+- **M4.9 — Runbook updates.**
+  - **Deliverable:** `docs/operations/runbook.md` covers split deploy: commands for instance 1 and instance 2 compose files, image transfer flow (amd64 save/load), rollback by `IMAGE_TAG`, restart per service, and Postgres cross-host firewall notes.
 
 ### M5 — Resend email verification and test delivery
 
