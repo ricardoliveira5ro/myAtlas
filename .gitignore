@@ -26,3 +26,5 @@ crash.*.log
 # OS
 .DS_Store
 Thumbs.db
+
+key-notes.md

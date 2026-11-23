@@ -182,6 +182,108 @@ apt-get install -s -y <package>
 
 before installing.
 
+## 8. Public IP missing from IMDS v2
+
+We asked the OCI instance metadata endpoint for `publicIp` and `privateIp` and
+got:
+
+```json
+{
+  "displayName": "myatlas-prod-01",
+  "publicIp": null,
+  "privateIp": null,
+  "region": "uk-london-1"
+}
+```
+
+### What it meant
+
+Nothing was wrong with the instance. `/opc/v2/instance/` simply does not expose
+those fields. The jq output was `null` because we asked for keys that were not
+in the response.
+
+### Fix
+
+Use the VNIC endpoint instead:
+
+`curl -fsS -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/vnics/ | jq '.[] | {nicIndex, privateIp, publicIp, subnetId}'`
+
+`curl -4 ifconfig.me` confirmed the same address from the outside.
+
+### Lesson
+
+Check which API endpoint actually contains the field before assuming a resource
+is misconfigured.
+
+## 9. Empty preflight output looked alarming
+
+Before starting the probe, `docker ps`, `docker ps -a`, and `ss -lntp | grep
+80|443` all returned nothing.
+
+### What it meant
+
+That was the desired state. No containers existed yet, and no process held ports
+80 or 443, so Caddy could bind them.
+
+### Fix
+
+None needed. We recorded the empty output as evidence rather than trying to
+"fix" it.
+
+### Lesson
+
+An empty result is not automatically a failure. Decide in advance what the
+correct output should be.
+
+## 10. Caddy chose a different ACME challenge
+
+We expected the HTTP-01 challenge on port 80. The logs showed:
+
+```text
+"challenge_type":"tls-alpn-01"
+"msg":"served key authentication certificate"
+```
+
+### What it meant
+
+Caddy prefers `tls-alpn-01` when port 443 is reachable. It still proved domain
+control; it just used a TLS handshake instead of a file on port 80.
+
+### Fix
+
+None needed. We noted that inbound 443 is required, not only port 80, and wrote
+that into the runbook.
+
+### Lesson
+
+Read what the tool actually did, not what you predicted it would do. The plan's
+acceptance criteria matter more than the internal mechanism.
+
+## 11. Staging warnings that were not errors
+
+Two messages looked concerning but were harmless:
+
+```text
+Caddyfile input is not formatted; run 'caddy fmt --overwrite'
+curl: (60) SSL certificate problem ...
+```
+
+### What it meant
+
+The first was cosmetic indentation in the Caddyfile. The second is what happens
+when you use plain `curl` against an untrusted staging certificate — which is
+exactly why we use `curl -k`.
+
+### Fix
+
+No configuration change. We used `curl -k` for the staging checks and recorded
+the formatting warning as cosmetic.
+
+### Lesson
+
+Classifying a message as a warning or an error requires knowing the context.
+Staging certificates are supposed to be rejected by browsers.
+
 ## Overall lesson
 
 None of these were application bugs. They were environment and tooling issues:
@@ -192,6 +294,10 @@ None of these were application bugs. They were environment and tooling issues:
 - shell quoting
 - Linux permissions
 - package conflicts
+- wrong metadata endpoint
+- misread "empty" output
+- unexpected but valid ACME challenge choice
+- expected staging-certificate warnings
 
 This is normal infrastructure work. The important habits are:
 

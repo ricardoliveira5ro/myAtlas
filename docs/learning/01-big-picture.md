@@ -60,6 +60,8 @@ Caddy on instance 1
 
 Postgres will run on instance 1. Instance 2 will reach it at `<INSTANCE1_PRIVATE_IP>:5432`, and only instance 2 is allowed to do so.
 
+Caddy is the front door: a web server that forwards requests to the other services and handles HTTPS certificates. If that name is new, [DNS, TLS, and Caddy](./07-dns-tls-and-caddy.md) explains it from scratch. M3 already proved Caddy can get a certificate; M4 will give it the real routing rules.
+
 ## What stage M1 did
 
 M1 established the cloud network and the two VMs:
@@ -91,8 +93,6 @@ M2 prepared the operating systems:
 
 The following are still ahead:
 
-- DNS records for `myatlas.services`
-- staging TLS probe with Caddy
 - split production Compose files
 - building `linux/amd64` images on the workstation
 - transferring images to the hosts

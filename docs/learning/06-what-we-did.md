@@ -130,6 +130,58 @@ On both hosts we configured:
 
 We verified both hosts showed synchronized time and active 2 GB swap.
 
+## M3.1 — DNS records in GoDaddy
+
+We replaced the parked records for the apex and `www` with two A records, both
+pointing to the reserved public IP of instance 1 with a 600-second TTL:
+
+```text
+A   @     <INSTANCE1_PUBLIC_IP>   600
+A   www   <INSTANCE1_PUBLIC_IP>   600
+```
+
+We left the GoDaddy NS, SOA, `_domainconnect`, and DMARC records alone: they
+belong to GoDaddy or to later email work, not to this milestone.
+
+We confirmed propagation with `dig +short A myatlas.services @1.1.1.1` and the
+equivalent `www` query.
+
+Inside instance 1, `/opc/v2/instance/` returned `null` for the IP fields because
+IMDS v2 exposes those under `/opc/v2/vnics/`. That endpoint and
+`curl -4 ifconfig.me` both confirmed the address really belongs to instance 1.
+
+## M3.2 — Staging TLS probe
+
+We created `/srv/myatlas/probe/Caddyfile` with a staging ACME configuration:
+
+- `myatlas.services` returned a fixed text with status 200.
+- `www.myatlas.services` redirected to the apex with 301.
+- `acme_ca` pointed at the Let's Encrypt **staging** directory.
+
+We ran a temporary container from the pinned `caddy:2.10.2-alpine` image, with
+ports 80 and 443 published and the ACME state kept in the named volume
+`caddy-probe-data`.
+
+Caddy registered an ACME account, chose the `tls-alpn-01` challenge on port 443,
+and obtained staging certificates for both names. From the workstation we
+verified:
+
+```text
+HTTPS      200, body "myatlas stage 2 tls probe"
+HTTP       308 https://myatlas.services/
+www        301 https://myatlas.services/
+issuer     CN=(STAGING) Artificial Amaranth YE1
+```
+
+We stopped and removed the probe container but kept `caddy-probe-data` until M4
+is healthy. No production certificate was issued.
+
+## M3.3 — Runbook
+
+We created `docs/operations/runbook.md` with a "TLS probe and rollback" section
+covering the staging-only rule, the probe procedure, production rate limits,
+and the rollback checklist.
+
 ## Repository changes
 
 We modified:
@@ -138,6 +190,7 @@ We modified:
 docs/planning/stage-2-deployment-plan.md
 scripts/deploy/bootstrap-host.sh
 docs/learning/*
+docs/operations/runbook.md
 ```
 
 The planning document was updated to reflect:
@@ -150,10 +203,10 @@ The planning document was updated to reflect:
 - passwordless sudo
 - updated firewall rules and risks
 
-No git commit has been made yet.
+Changes are committed as milestones complete.
 
 ## Current state
 
-M1 and M2 are complete.
+M1, M2, and M3 are complete.
 
-M3 is next: DNS and staging TLS probe.
+M4 is next: split production Compose files and the first full deploy.

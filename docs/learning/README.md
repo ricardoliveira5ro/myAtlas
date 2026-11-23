@@ -8,6 +8,7 @@ For authoritative decisions and execution steps, use:
 
 - `docs/planning/stage-2-deployment-plan.md`
 - `docs/adr/ADR-0005-stage-2-deployment-topology.md`
+- `docs/operations/runbook.md` for operational and recovery procedures
 - `docs/operations/stage-2-verification.md` once it is created
 
 ## Read in this order
@@ -17,13 +18,14 @@ For authoritative decisions and execution steps, use:
 3. [SSH, users, and sudo](./03-ssh-users-and-sudo.md) — how we log in and why `deploy` exists.
 4. [Docker and host setup](./04-docker-and-host-setup.md) — what the bootstrap script installed and how Docker storage is arranged.
 5. [Firewalls](./05-firewalls.md) — OCI security lists, UFW, and Docker’s `DOCKER-USER` chain.
-6. [What we actually did](./06-what-we-did.md) — chronological summary of M1 and M2.
-7. [Mistakes and fixes](./07-mistakes-and-fixes.md) — the issues we hit and what they taught.
-8. [Glossary](./08-glossary.md) — short definitions of the terms used in these notes.
+6. [What we actually did](./06-what-we-did.md) — chronological summary of M1, M2, and M3.
+7. [DNS, TLS, and Caddy](./07-dns-tls-and-caddy.md) — what Caddy is, how HTTPS certificates work, and what the M3 probe proved.
+8. [Mistakes and fixes](./08-mistakes-and-fixes.md) — the issues we hit and what they taught.
+9. [Glossary](./09-glossary.md) — short definitions of the terms used in these notes.
 
 ## Current checkpoint
 
-As of 2026-11-21:
+As of 2026-11-22:
 
 - Two OCI VMs are running.
 - Both hosts are bootstrapped with Docker and operational tools.
@@ -31,6 +33,8 @@ As of 2026-11-21:
 - Host firewalls and Docker port guards are configured on both hosts.
 - Instance 1 stores Docker data on the 50 GB block volume.
 - Both hosts use UTC, time sync, and 2 GB swap.
-- DNS and TLS have **not** been configured yet.
+- DNS is configured: apex and `www` A records point to instance 1.
+- A staging-only Caddy probe proved HTTPS, HTTP-to-HTTPS redirect, and the
+  `www`-to-apex redirect on instance 1. No production certificate was issued.
 - The application containers have **not** been deployed yet.
-- Planning and script changes are uncommitted.
+- Planning, runbook, and learning-note changes are committed.
