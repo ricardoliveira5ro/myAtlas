@@ -1,0 +1,55 @@
+{
+  admin off
+  email {$ACME_EMAIL}
+}
+
+{$WWW_DOMAIN} {
+  redir https://{$APP_DOMAIN}{uri} 301
+}
+
+{$APP_DOMAIN} {
+  encode gzip
+
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+  }
+
+  request_body {
+    max_size 10MB
+  }
+
+  handle /api/v1/identity/* {
+    reverse_proxy account:8081
+  }
+
+  handle /api/v1/atlas/* {
+    reverse_proxy {$INSTANCE2_PRIVATE_IP:?Set INSTANCE2_PRIVATE_IP}:8082
+  }
+
+  handle /api/v1/media/* {
+    reverse_proxy {$INSTANCE2_PRIVATE_IP:?Set INSTANCE2_PRIVATE_IP}:8083
+  }
+
+  handle /api/v1/social/* {
+    reverse_proxy {$INSTANCE2_PRIVATE_IP:?Set INSTANCE2_PRIVATE_IP}:8084
+  }
+
+  handle /api/v1* {
+    header Content-Type application/problem+json
+    respond `{"type":"about:blank","title":"Not Found","status":404,"detail":"No API route matches this path.","instance":"{http.request.uri}","code":"NOT_FOUND"}` 404
+  }
+
+  handle /actuator* {
+    respond 404
+  }
+
+  handle {
+    reverse_proxy web:3000
+  }
+
+  log {
+    output stdout
+    format json
+  }
+}
