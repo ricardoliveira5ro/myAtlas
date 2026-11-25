@@ -1,0 +1,104 @@
+name: myatlas-instance2
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  atlas:
+    image: "${IMAGE_REGISTRY:?Set IMAGE_REGISTRY}/atlas:${IMAGE_TAG:?Set IMAGE_TAG}"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8082
+      ATLAS_DB_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres}:5432/atlas_db
+      ATLAS_DB_USER: atlas
+      ATLAS_DB_PASSWORD: ${ATLAS_DB_PASSWORD:?Set ATLAS_DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: -Xmx176m -XX:MaxMetaspaceSize=96m
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"
+    ports:
+      - "${INSTANCE2_PRIVATE_IP:?Set INSTANCE2_PRIVATE_IP}:8082:8082"
+    networks:
+      - application
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/8082
+          printf 'GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+          grep -q '^HTTP/1\.[01] 200' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
+    mem_limit: 352m
+    logging: *default-logging
+    restart: unless-stopped
+
+  media:
+    image: "${IMAGE_REGISTRY:?Set IMAGE_REGISTRY}/media:${IMAGE_TAG:?Set IMAGE_TAG}"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8083
+      MEDIA_DB_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres}:5432/media_db
+      MEDIA_DB_USER: media
+      MEDIA_DB_PASSWORD: ${MEDIA_DB_PASSWORD:?Set MEDIA_DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: -Xmx144m -XX:MaxMetaspaceSize=96m
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"
+    ports:
+      - "${INSTANCE2_PRIVATE_IP:?Set INSTANCE2_PRIVATE_IP}:8083:8083"
+    networks:
+      - application
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/8083
+          printf 'GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+          grep -q '^HTTP/1\.[01] 200' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
+    mem_limit: 288m
+    logging: *default-logging
+    restart: unless-stopped
+
+  social:
+    image: "${IMAGE_REGISTRY:?Set IMAGE_REGISTRY}/social:${IMAGE_TAG:?Set IMAGE_TAG}"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8084
+      SOCIAL_DB_URL: jdbc:postgresql://${POSTGRES_HOST:-postgres}:5432/social_db
+      SOCIAL_DB_USER: social
+      SOCIAL_DB_PASSWORD: ${SOCIAL_DB_PASSWORD:?Set SOCIAL_DB_PASSWORD}
+      JAVA_TOOL_OPTIONS: -Xmx112m -XX:MaxMetaspaceSize=96m
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "5"
+    ports:
+      - "${INSTANCE2_PRIVATE_IP:?Set INSTANCE2_PRIVATE_IP}:8084:8084"
+    networks:
+      - application
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/8084
+          printf 'GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+          grep -q '^HTTP/1\.[01] 200' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
+    mem_limit: 224m
+    logging: *default-logging
+    restart: unless-stopped
+
+networks:
+  application:

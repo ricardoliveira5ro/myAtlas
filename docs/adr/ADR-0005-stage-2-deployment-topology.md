@@ -31,15 +31,26 @@ This topology splits services across two hosts to fit 1 GB RAM per box (tight). 
 
 | Image | Tag | `linux/amd64` digest | Captured |
 | --- | --- | --- | --- |
-| Caddy | `caddy:2.10.2-alpine` | `TBD` | M4.1 (re-verified) |
-| PostgreSQL/PostGIS | `postgis/postgis:18-3.6` | `TBD` | M4.1 (re-verified) |
+| Caddy | `caddy:2.10.2-alpine` | `sha256:d8c17a862962def15cde69863a3a463f25a2664942eafd7bdbf050e9c3116b83` | 2026-11-25 (M4.1) |
+| PostgreSQL/PostGIS | `postgis/postgis:18-3.6` | `sha256:530bb81ad6c5993ae870ea66095d9dc758ef5866007186833f31fb2bebdd5791` | 2026-11-25 (M4.1) |
 
-Capture with (on a host that can inspect manifests):
+Captured with (on a host that can inspect manifests):
 ```sh
 docker buildx imagetools inspect caddy:2.10.2-alpine
 docker buildx imagetools inspect postgis/postgis:18-3.6
 ```
-Record the `linux/amd64` platform digest.
+
+Relevant output lines from the `linux/amd64` manifest entries:
+
+```text
+Name:        docker.io/library/caddy:2.10.2-alpine@sha256:d8c17a862962def15cde69863a3a463f25a2664942eafd7bdbf050e9c3116b83
+Platform:    linux/amd64
+
+Name:        docker.io/postgis/postgis:18-3.6@sha256:530bb81ad6c5993ae870ea66095d9dc758ef5866007186833f31fb2bebdd5791
+Platform:    linux/amd64
+```
+
+These are the per-platform manifest digests, not the top-level index digests (`sha256:4c6e91c6...` for Caddy and `sha256:4a43e3c3...` for PostGIS), so a pinned reference always resolves to an amd64 image.
 
 ## Consequences
 

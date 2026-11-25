@@ -51,7 +51,7 @@ The command was fine, but we gave it the wrong kind of ID.
 We used the VCN OCID:
 
 ```text
-ocid1.vcn.oc1.uk-london-1.amaaaaaawwj3aaqahrclhg3nw2dhvrsvbxvv2fwumqb6tekse4gmsqu5fvpq
+<VCN_OCID>
 ```
 
 ### Lesson
