@@ -7,6 +7,7 @@ procedures and recovery steps. Sections are added as milestones complete.
 Currently covered:
 
 - TLS probe and rollback (M3.3)
+- Split production deployment and verification (M4.4–M4.9)
 
 ## TLS probe and rollback
 
@@ -166,3 +167,187 @@ production issuance in M4.
 
 Record the commands and their outputs in
 `docs/operations/stage-2-verification.md` as evidence for M3.2 and M3.3.
+
+### Split production deployment (M4)
+
+Instance 1 owns Postgres, account, web, and the public Caddy edge. Instance 2
+owns atlas, media, and social; those ports are private and reachable only from
+instance 1's Caddy over the OCI private network. The authoritative task order is
+`docs/planning/stage-2-deployment-plan.md`; this section holds the repeatable
+operational path and the fixes found during the first deploy.
+
+All five service images are pinned by `IMAGE_TAG` in `.env.production`. Caddy and
+PostGIS are pinned by digest in the Compose files. Pulling those dependencies by
+tag does not make a platform digest addressable locally, so pull the digest
+explicitly after loading the service images:
+
+`docker pull caddy@sha256:<CADDY_AMD64_DIGEST>`
+
+`docker pull postgis/postgis@sha256:<POSTGIS_AMD64_DIGEST>`
+
+#### First deploy
+
+Build for `linux/amd64` on the workstation, then save and load the backend
+bundle on both hosts. If instance 1 has no SSH key for instance 2, copy directly
+from the workstation to instance 2's public IP instead of hopping through
+instance 1.
+
+`docker buildx build --platform linux/amd64 -t myatlas/account:$IMAGE_TAG ./services/account`
+
+`docker buildx build --platform linux/amd64 -t myatlas/atlas:$IMAGE_TAG ./services/atlas`
+
+`docker buildx build --platform linux/amd64 -t myatlas/media:$IMAGE_TAG ./services/media`
+
+`docker buildx build --platform linux/amd64 -t myatlas/social:$IMAGE_TAG ./services/social`
+
+`docker buildx build --platform linux/amd64 -t myatlas/web:$IMAGE_TAG ./apps/web`
+
+`docker save myatlas/account:$IMAGE_TAG myatlas/atlas:$IMAGE_TAG myatlas/media:$IMAGE_TAG myatlas/social:$IMAGE_TAG | gzip > /tmp/myatlas-backend-$IMAGE_TAG.tar.gz`
+
+`scp -i ~/.ssh/myatlas_prod /tmp/myatlas-backend-$IMAGE_TAG.tar.gz deploy@<INSTANCE1_PUBLIC_IP>:/srv/myatlas/app/`
+
+`scp -i ~/.ssh/myatlas_prod /tmp/myatlas-backend-$IMAGE_TAG.tar.gz deploy@<INSTANCE2_PUBLIC_IP>:/srv/myatlas/app/`
+
+On each host:
+
+`cd /srv/myatlas/app`
+
+`docker load -i myatlas-backend-$IMAGE_TAG.tar.gz`
+
+Use `docker image inspect --format '{{.Architecture}}' myatlas/account:$IMAGE_TAG`
+to confirm `amd64`.
+
+##### Start order
+
+Instance 1, with Caddy last so ACME sees a complete backend:
+
+`cd /srv/myatlas/app`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait postgres`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait account`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait web`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait caddy`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production ps`
+
+Instance 2:
+
+`cd /srv/myatlas/app`
+
+`docker compose -f infra/compose/production-instance2.yml --env-file infra/compose/.env.production up -d --wait`
+
+`docker compose -f infra/compose/production-instance2.yml --env-file infra/compose/.env.production ps`
+
+Do not publish instance 2's ports publicly. Instance 1's Caddy reaches them at
+`<INSTANCE2_PRIVATE_IP>:8082` through `:8084`.
+
+#### Update deploy
+
+Use a new `IMAGE_TAG` for every code change. Reusing a tag already loaded on a
+host can leave the old image in place.
+
+`export IMAGE_TAG=<NEW_TAG>`
+
+`docker buildx build --platform linux/amd64 -t myatlas/account:$IMAGE_TAG ./services/account`
+
+`docker buildx build --platform linux/amd64 -t myatlas/atlas:$IMAGE_TAG ./services/atlas`
+
+`docker buildx build --platform linux/amd64 -t myatlas/media:$IMAGE_TAG ./services/media`
+
+`docker buildx build --platform linux/amd64 -t myatlas/social:$IMAGE_TAG ./services/social`
+
+`docker buildx build --platform linux/amd64 -t myatlas/web:$IMAGE_TAG ./apps/web`
+
+`docker save myatlas/account:$IMAGE_TAG myatlas/atlas:$IMAGE_TAG myatlas/media:$IMAGE_TAG myatlas/social:$IMAGE_TAG | gzip > /tmp/myatlas-backend-$IMAGE_TAG.tar.gz`
+
+`scp -i ~/.ssh/myatlas_prod /tmp/myatlas-backend-$IMAGE_TAG.tar.gz deploy@<INSTANCE1_PUBLIC_IP>:/srv/myatlas/app/`
+
+`scp -i ~/.ssh/myatlas_prod /tmp/myatlas-backend-$IMAGE_TAG.tar.gz deploy@<INSTANCE2_PUBLIC_IP>:/srv/myatlas/app/`
+
+On each host, load the bundle and set the new tag before recreating services:
+
+`cd /srv/myatlas/app`
+
+`docker load -i myatlas-backend-$IMAGE_TAG.tar.gz`
+
+`sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=<NEW_TAG>/' infra/compose/.env.production`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --force-recreate --no-deps account web`
+
+`docker compose -f infra/compose/production-instance2.yml --env-file infra/compose/.env.production up -d --force-recreate --no-deps atlas media social`
+
+#### Restart
+
+Restart one service without disturbing its neighbours:
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production restart account`
+
+`docker compose -f infra/compose/production-instance2.yml --env-file infra/compose/.env.production restart atlas`
+
+#### Rollback image tag
+
+To roll back service images, load the previous bundle, set `IMAGE_TAG` to the
+previous tag in both `.env.production` files, then recreate the affected
+services:
+
+`docker load -i /srv/myatlas/app/myatlas-backend-<PREVIOUS_TAG>.tar.gz`
+
+`sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=<PREVIOUS_TAG>/' infra/compose/.env.production`
+
+`docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --force-recreate --no-deps account web`
+
+`docker compose -f infra/compose/production-instance2.yml --env-file infra/compose/.env.production up -d --force-recreate --no-deps atlas media social`
+
+Caddy and Postgres remain pinned by digest unless their Compose digests are
+changed deliberately. Never source `.env.production` wholesale; read individual
+values with `sed` when a script needs one.
+
+#### Cross-host firewall
+
+`DOCKER-USER` is evaluated for forwarded container traffic. Generic destination
+port drops therefore also block legitimate traffic between the two hosts. The
+host-side firewall script is
+`/usr/local/sbin/myatlas-docker-firewall.sh`, run by
+`myatlas-docker-firewall.service`.
+
+On instance 1, allow outbound Caddy → instance 2 before the `8081:8084` DROP:
+
+`iptables -A DOCKER-USER -p tcp -d <INSTANCE2_PRIVATE_IP> --dport 8082:8084 -j ACCEPT`
+
+On instance 2, allow outbound backend → instance 1 Postgres before the `5432`
+DROP:
+
+`iptables -A DOCKER-USER -p tcp -d <INSTANCE1_PRIVATE_IP> --dport 5432 -j ACCEPT`
+
+After editing the script:
+
+`sudo systemctl daemon-reload`
+
+`sudo systemctl restart myatlas-docker-firewall`
+
+`sudo iptables -S DOCKER-USER`
+
+Keep an OCI Cloud Shell session open while changing firewall rules in case SSH
+is interrupted.
+
+#### First-deploy findings
+
+- Spring Boot 4 jars no longer contain `org.springframework.boot.loader.launch.JarLauncher`. The four Java Dockerfiles must use `java -jar /app/<service>-0.0.1-SNAPSHOT.jar`; the Spring Boot 3 entrypoint fails with `ClassNotFoundException`.
+- The generic `DOCKER-USER` drops above caused `502` through Caddy and Flyway `Connect timed out` on instance 2 until the destination-scoped ACCEPT rules were added.
+- The first identity ping after an idle period timed out once; the next three rounds passed in `0.15s`–`1.75s` with `X-Request-ID`. Investigate if it recurs rather than treating it as a routing fault.
+
+#### Verification evidence (M4.6–M4.8)
+
+- Public: HTTPS root `200`, HTTP root `308 https://myatlas.services/`, `www` `301 https://myatlas.services/`.
+- Pings: all four `/api/v1/{identity,atlas,media,social}/ping` returned `200` with `X-Request-ID`.
+- Negative cases: unknown API `404` with `application/problem+json`; `/actuator/health` `404`.
+- Flyway: `V1` / `baseline` / `success = t` present in `account_db`, `atlas_db`, `media_db`, and `social_db`.
+- Certificates: real issuer `acme-v02.api.letsencrypt.org-directory` for apex and `www`.
+- Limits: caddy `64m`, web `224m`, account `352m`, postgres `352m` on instance 1; atlas `352m`, media `288m`, social `224m` on instance 2.
+- Heap: account/atlas `-Xmx176m`, media `-Xmx144m`, social `-Xmx112m`, all with `-XX:MaxMetaspaceSize=96m`.
+- Database: `max_connections = 40`, five idle JDBC connections per database.
+- Hosts: about `492Mi` / `415Mi` available memory and `1.5Gi` / `1.3Gi` swap free on instances 1 and 2 respectively.
+- Secrets: `.env.production` is mode `600`, owned by `deploy`, ignored by git, untracked, and identical on both hosts.

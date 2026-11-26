@@ -17,4 +17,4 @@ COPY --from=build --chown=appuser:appuser /workspace/extracted/snapshot-dependen
 COPY --from=build --chown=appuser:appuser /workspace/extracted/application/ ./
 USER 10001
 EXPOSE 8084
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "org.springframework.boot.loader.launch.JarLauncher"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/social-0.0.1-SNAPSHOT.jar"]

@@ -120,8 +120,6 @@ M5, M6, and M7 may run in parallel after M4 because they touch different resourc
 | `docs/adr/ADR-0007-backup-encryption-and-retention.md` | Create | Records `age` encryption, offline private key, instance-principal preference, Identity Domains dynamic-group risk, fallback API key/config ownership, and retention. |
 | `infra/compose/production-instance1.yml`, `infra/compose/production-instance2.yml` | Create | Split from `production.yml`: instance 1 adds `caddy`, resource limits, logging rotation, volumes, JVM/Hikari/Postgres settings, and removes the public web port; instance 2 runs `atlas`, `media`, `social` and points `POSTGRES_HOST` at instance 1. |
 | `infra/compose/Caddyfile` | Create | Caddy site blocks, TLS, routing, redirects, JSON 404, Actuator block, security headers, access logs. |
-| `infra/compose/.env.production.example` | Create | Non-secret variable names and placeholders for production Compose. |
-| `.gitignore` | Modify | Unignore `infra/compose/.env.production.example` while keeping `.env.production` ignored. |
 | `scripts/deploy/bootstrap-host.sh` | Create | Idempotent Ubuntu 24.04 amd64 host bootstrap: packages, Docker, OCI CLI, `age`, directories. Host-aware: instance 1 requires the `/srv/myatlas` mount; instance 2 does not. |
 | `scripts/backup/backup-databases.sh` | Create | Dumps each database, encrypts with `age`, uploads to `myatlas-backups`, prunes local staging. |
 | `scripts/backup/restore-database.sh` | Create | Restores an encrypted dump into a clean local Postgres/PostGIS container. |
@@ -423,6 +421,7 @@ Apply M2.1–M2.5 on **instance 1 (`myatlas-prod-01`)** and **instance 2 (`myatl
     iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP
     iptables -A DOCKER-USER -p tcp --dport 3000 -j DROP
     iptables -A DOCKER-USER -p tcp --dport 8080 -j DROP
+    iptables -A DOCKER-USER -p tcp -d <INST2_PRIVATE_IP> --dport 8082:8084 -j ACCEPT
     iptables -A DOCKER-USER -p tcp --dport 8081:8084 -j DROP
     iptables -A DOCKER-USER -j RETURN
     EOF
@@ -461,6 +460,7 @@ Apply M2.1–M2.5 on **instance 1 (`myatlas-prod-01`)** and **instance 2 (`myatl
     iptables -n -L DOCKER-USER >/dev/null 2>&1 || exit 0
     iptables -F DOCKER-USER
     iptables -A DOCKER-USER -p tcp -s <INST1_PRIVATE_IP> --dport 8082:8084 -j ACCEPT
+    iptables -A DOCKER-USER -p tcp -d <INST1_PRIVATE_IP> --dport 5432 -j ACCEPT
     iptables -A DOCKER-USER -p tcp --dport 5432 -j DROP
     iptables -A DOCKER-USER -p tcp --dport 3000 -j DROP
     iptables -A DOCKER-USER -p tcp --dport 8080 -j DROP
@@ -487,9 +487,9 @@ Apply M2.1–M2.5 on **instance 1 (`myatlas-prod-01`)** and **instance 2 (`myatl
     sudo ufw status verbose
     sudo iptables -S DOCKER-USER
     ```
-  - **Ordering note:** The script flushes `DOCKER-USER` and appends rules in order, so the source-scoped `ACCEPT` is above the port-range `DROP` lines. It is idempotent and reruns after Docker starts at boot. Replace `<INST1_PRIVATE_IP>`/`<INST2_PRIVATE_IP>` with the actual private IPs before running.
+  - **Ordering note:** The script flushes `DOCKER-USER` and appends rules in order, so both the source-scoped inbound `ACCEPT` and the destination-scoped outbound `ACCEPT` sit above the port-range `DROP` lines. The outbound rules matter because `DOCKER-USER` also sees container traffic leaving the host: instance 1 needs to reach `<INST2_PRIVATE_IP>:8082-8084`, and instance 2 needs to reach `<INST1_PRIVATE_IP>:5432`. Without them, Caddy returns `502` and Flyway logs `Connect timed out`. The script is idempotent and reruns after Docker starts at boot. Replace `<INST1_PRIVATE_IP>`/`<INST2_PRIVATE_IP>` with the actual private IPs before running.
   - **Lockout safety:** Keep the OCI Cloud Shell and original SSH session open; verify from a second terminal before closing. If SSH is blocked, restore TCP 22 for the workstation-discovered owner IP using the runbook recovery path.
-  - **Acceptance:** `ufw status verbose` shows default deny incoming and the host-specific allow list; `myatlas-docker-firewall.service` is active; `iptables -S DOCKER-USER` shows the cross-host `ACCEPT` above the drops, and 3000/8080/8081–8084 are dropped from other sources on both hosts; second-terminal SSH works before the original session closes.
+  - **Acceptance:** `ufw status verbose` shows default deny incoming and the host-specific allow list; `myatlas-docker-firewall.service` is active; `iptables -S DOCKER-USER` shows both cross-host `ACCEPT` rules above the drops, and 3000/8080/8081–8084 are dropped from other sources on both hosts; second-terminal SSH works before the original session closes.
 - **M2.4 — Move Docker data and logs to the intended location.**
   - **Deliverable (instance 1):** `/etc/docker/daemon.json` with `"data-root": "/srv/myatlas/docker"`, `"log-driver": "json-file"`, and 10m/3 rotation, plus `/etc/systemd/system/docker.service.d/10-myatlas-mount.conf` with `RequiresMountsFor=/srv/myatlas` and `After=srv-myatlas.mount`.
   - **Commands (instance 1):**
@@ -627,7 +627,7 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
     docker buildx imagetools inspect postgis/postgis:18-3.6
     ```
     Set `production-instance1.yml` to `caddy:2.10.2-alpine@sha256:<CADDY_DIGEST>` and `postgis/postgis:18-3.6@sha256:<POSTGIS_DIGEST>`. Copy the digest from the `linux/amd64` platform entry and record both digests plus the exact `docker buildx imagetools inspect` commands and output in ADR-0005.
-  - **Port note:** Do not publish `443:443/udp`. Stage 2 uses HTTP-01 and does not need HTTP/3, so the OCI security list and UFW intentionally allow only TCP 80/443.
+  - **Port note:** Do not publish `443:443/udp`. Stage 2 does not use HTTP/3, so the OCI security list and UFW intentionally allow only TCP 80/443. The observed ACME challenge was `tls-alpn-01`, which needs TCP 443; TCP 80 remains necessary for the HTTP→HTTPS redirect.
   - **Network note:** Do not set the `application` network to `internal: true`. Services need outbound HTTPS for Resend, OCI Object Storage, and Caddy's ACME challenge. Isolation comes from publishing no ports except Caddy's 80/443.
   - **Database-init note:** `infra/compose/postgres-init/001-create-databases-and-roles.sh` runs only when the `postgres-data` volume is empty. If the volume already exists, inspect it before recreating it; do not delete a volume that may contain data.
   - **Acceptance:** Replace `<CADDY_DIGEST>` and `<POSTGIS_DIGEST>` with the captured values before validating; no angle-bracket placeholder may remain in either split file. Validate both Compose files with a temporary non-secret env file (the real `.env.production` is created in M4.5):
@@ -719,7 +719,7 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
       }
     }
     ```
-  - **Expected behavior:** `/` reaches web; each API prefix reaches its service; unknown `/api/v1/*` returns JSON 404; `/actuator/*` returns 404; `www` redirects to the apex with a `301` because the Caddyfile uses an explicit `301`; Caddy obtains and renews certificates automatically via HTTP-01.
+  - **Expected behavior:** `/` reaches web; each API prefix reaches its service; unknown `/api/v1/*` returns JSON 404; `/actuator/*` returns 404; `www` redirects to the apex with a `301` because the Caddyfile uses an explicit `301`; Caddy obtains and renews certificates automatically via ACME (`tls-alpn-01` observed in this deployment, with HTTP-01 as fallback).
   - **Content-Type note:** The `header Content-Type application/problem+json` directive sets the unknown-API response type explicitly. Verify with `curl -i` that the response contains `Content-Type: application/problem+json`; if Caddy appends or overrides it, use `header +Content-Type` or set the header inside the `respond` handler.
   - **Body-limit note:** The 10 MB `request_body` limit covers the Stage 2 JSON APIs. Stage 5 media uploads will need a larger or streaming limit and are explicitly out of scope here.
   - **Cross-host note:** `account` and `web` run on instance 1 and are reached by service name. `atlas`, `media`, and `social` run on instance 2 and are reached by `INSTANCE2_PRIVATE_IP`; set it in instance 1's `.env.production` and pass it to the `caddy` container. Caddy cannot health-gate on remote service names.
@@ -734,41 +734,8 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
       caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
     ```
     The command prints `Valid configuration`.
-- **M4.3 — Create `infra/compose/.env.production.example`.**
-  - **Deliverable:** A committed example with non-secret names and placeholders only:
-    ```dotenv
-    # Domains and public URLs consumed by Compose/Caddy
-    APP_DOMAIN=myatlas.services
-    WWW_DOMAIN=www.myatlas.services
-    ACME_EMAIL=<OWNER_EMAIL>
-    INSTANCE1_PRIVATE_IP=<INSTANCE1_PRIVATE_IP>
-    INSTANCE2_PRIVATE_IP=<INSTANCE2_PRIVATE_IP>
-
-    # Reserved for Stage 3 application configuration; Compose does not pass these to any container.
-    APP_BASE_URL=https://myatlas.services
-    APP_PUBLIC_BASE_URL=https://myatlas.services
-    MAIL_PROVIDER=resend
-    MAIL_FROM=no-reply@myatlas.services
-
-    # Reserved for the Stage 3 email adapter; read directly by the Stage 2 M5.3 test script.
-    # Compose does not pass RESEND_API_KEY to any container.
-    RESEND_API_KEY=<RESEND_API_KEY>
-
-    # Image coordinates for the workstation build transferred to the hosts
-    IMAGE_REGISTRY=myatlas
-    IMAGE_TAG=<GIT_SHORT_SHA>
-
-    # PostgreSQL location: instance 1 uses postgres (local); instance 2 uses instance 1's private IP.
-    POSTGRES_HOST=postgres
-
-    # PostgreSQL bootstrap and per-service credentials
-    POSTGRES_ADMIN_USER=postgres
-    POSTGRES_ADMIN_PASSWORD=<GENERATE_LONG_RANDOM_VALUE>
-    ACCOUNT_DB_PASSWORD=<GENERATE_LONG_RANDOM_VALUE>
-    ATLAS_DB_PASSWORD=<GENERATE_LONG_RANDOM_VALUE>
-    MEDIA_DB_PASSWORD=<GENERATE_LONG_RANDOM_VALUE>
-    SOCIAL_DB_PASSWORD=<GENERATE_LONG_RANDOM_VALUE>
-    ```
+- **M4.3 — Define the production environment contract.**
+  - **Deliverable:** No `infra/compose/.env.production.example` is committed. The real `.env.production` is created directly on each host in M4.5 from the ownership table below, mode `600`, owned by `deploy`, and ignored by git. Operators must fill every Compose variable from this section; no real value belongs in the repository.
   - **Env-file ownership:**
     | File | Variables owned | Notes |
     | --- | --- | --- |
@@ -777,8 +744,7 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
     | `/etc/myatlas/backup.env` | `AGE_PUBLIC_KEY`, `BACKUP_BUCKET=myatlas-backups`, `OCI_CLI_AUTH` (`instance_principal`, or `api_key` in the fallback), `OCI_CLI_REGION=uk-london-1`, `OCI_CLI_NAMESPACE=<OBJECT_STORAGE_NAMESPACE>`, and `OCI_CLI_CONFIG_FILE` when the fallback API key is used | Consumed only by the systemd backup service. Mode 600. |
     | `/etc/myatlas/oci/config` | OCI CLI profile for fallback API-key auth, including `region` and `namespace` when they are stored here instead of `backup.env` | Created only when instance principal is unavailable. Owns the API-key credentials; `OCI_CLI_CONFIG_FILE` in `backup.env` points to it. `deploy:deploy` mode 600 or `root:deploy` mode 640. |
   - **Ownership rule:** Each variable has exactly one owning file. Compose reads only `infra/compose/.env.production`; systemd reads only `/etc/myatlas/backup.env`; the OCI CLI reads `/etc/myatlas/oci/config` only when the fallback API key is used. Do not duplicate secrets across files.
-  - **Also modify `.gitignore`:** add `!infra/compose/.env.production.example` after the `.env.*` rule so the example is tracked while `.env.production` remains ignored.
-  - **Acceptance:** `git check-ignore -v infra/compose/.env.production` reports the `.env.*` rule; `git check-ignore -v infra/compose/.env.production.example` reports no match. The example contains no real secret values.
+  - **Acceptance:** `git check-ignore -v infra/compose/.env.production` reports the `.env.*` rule; no env template or real env value is tracked in git.
 - **M4.4 — Build the amd64 images on the owner workstation and transfer them to the hosts.**
   - **Deliverable:** A clean clone at `/srv/myatlas/app` on each host; images tagged `myatlas/<service>:<IMAGE_TAG>` for `account`, `atlas`, `media`, `social`, and `web`, built for `linux/amd64` on the workstation; the pinned Caddy/PostGIS images pulled on instance 1.
   - **Build (owner workstation):**
@@ -815,13 +781,13 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
   - **Expected:** Each build completes on the workstation; `docker image inspect myatlas/account:${IMAGE_TAG} --format '{{.Architecture}}'` returns `amd64`; the Caddy and PostGIS inspect outputs show `linux/amd64` manifests and their digests; `docker load` reports the expected tags on each host.
   - **Acceptance:** The five service images are present on the hosts that need them (`account`, `web` on instance 1; `atlas`, `media`, `social` on instance 2) and are `amd64`; Caddy and PostGIS are pulled on instance 1; their `linux/amd64` digests are recorded in ADR-0005 and pinned in `production-instance1.yml`. No JVM image is built on a 1 GB host.
 - **M4.5 — Create the production environment files and first split deploy.**
-  - **Deliverable:** `/srv/myatlas/app/infra/compose/.env.production` on both hosts, populated from the example, owned by `deploy`, mode 600; the split stacks running. Start Postgres before instance 2, because the backend services use instance 1's Postgres.
+  - **Deliverable:** `/srv/myatlas/app/infra/compose/.env.production` on both hosts, populated from the M4.3 ownership contract, owned by `deploy`, mode 600; the split stacks running. Start Postgres before instance 2, because the backend services use instance 1's Postgres.
   - **Commands (instance 1, database first):**
     ```sh
     cd /srv/myatlas/app
-    cp infra/compose/.env.production.example infra/compose/.env.production
-    chmod 600 infra/compose/.env.production
-    # Edit .env.production: set IMAGE_TAG, POSTGRES_HOST=postgres, INSTANCE2_PRIVATE_IP, and all <...> placeholders.
+    umask 077
+    touch infra/compose/.env.production
+    # Populate .env.production from the M4.3 ownership contract: set IMAGE_TAG, POSTGRES_HOST=postgres, INSTANCE2_PRIVATE_IP, and all credentials.
     docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait postgres
     docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait account
     docker compose -f infra/compose/production-instance1.yml --env-file infra/compose/.env.production up -d --wait web
@@ -829,9 +795,9 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
   - **Commands (instance 2, after Postgres is healthy):**
     ```sh
     cd /srv/myatlas/app
-    cp infra/compose/.env.production.example infra/compose/.env.production
-    chmod 600 infra/compose/.env.production
-    # Edit .env.production: set IMAGE_TAG, POSTGRES_HOST=<INSTANCE1_PRIVATE_IP>, and the DB passwords.
+    umask 077
+    touch infra/compose/.env.production
+    # Populate .env.production from the M4.3 ownership contract: set IMAGE_TAG, POSTGRES_HOST=<INSTANCE1_PRIVATE_IP>, and the DB passwords.
     docker compose -f infra/compose/production-instance2.yml --env-file infra/compose/.env.production up -d --wait
     ```
   - **Commands (instance 1, edge last):**
@@ -1405,7 +1371,7 @@ Acceptance (M2 overall): both hosts have Docker/Compose/age/jq/oci-cli/shellchec
 | Terminating an instance preserves the boot volume by default. | Orphaned boot volumes and unattached reserved IPs count against quotas. | Inventory and cleanup discipline in M1.6 and M8.1. |
 | Instance 2 relies on an ephemeral public IP for outbound access. | The IP can change on reboot or release, and the host is internet-routable. | Keep inbound restricted to owner SSH and instance 1 service ports in the security list and UFW; record the current IP after any reboot; NAT gateways are unavailable in this tenancy. |
 | OCI blocks outbound TCP 25. | SMTP on port 25 will not work. | Use Resend's HTTPS API (port 443) or SMTP 587; Stage 2 uses the HTTPS API. |
-| Caddy HTTP-01 needs public DNS and reachable 80/443. | Certificate issuance fails if DNS or ports are wrong. | M3.1 and M3.2 verify DNS and ports; use Let's Encrypt staging for repeated probes to avoid rate limits. |
+| Caddy ACME validation (`tls-alpn-01` observed) needs public DNS and reachable TCP 443; TCP 80 is still needed for the HTTP→HTTPS redirect. | Certificate issuance fails if DNS or ports are wrong. | M3.1 and M3.2 verify DNS and ports; use Let's Encrypt staging for repeated probes to avoid rate limits. |
 | GoDaddy DNS propagation and default records. | The apex may serve a parked page or stale records. | Record the baseline in M0.3; lower TTL to 600; remove conflicting default records; verify with two public resolvers. |
 | PostGIS image may lack an amd64 manifest for the pinned tag. | The database container will not run on instance 1. | Preflight `docker buildx imagetools inspect` in M4.4; if absent, select a verified amd64 PostGIS 18/3.6 image and record it in ADR-0005. |
 | Each host is a single point of failure for its slice. | Instance 1 failure takes down the edge, web, account, and Postgres; instance 2 failure takes down atlas/media/social. | Document both failure modes in ADR-0005; rely on backups and the recovery runbook; do not claim high availability. |

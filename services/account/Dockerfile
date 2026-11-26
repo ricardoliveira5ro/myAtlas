@@ -30,4 +30,4 @@ USER 10001
 EXPOSE 8081
 # Defines the command Docker runs when the container starts. It launches the unpacked Spring Boot application. 
 # MaxRAMPercentage tells Java to size its memory use based on the container’s available memory.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "org.springframework.boot.loader.launch.JarLauncher"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/account-0.0.1-SNAPSHOT.jar"]
